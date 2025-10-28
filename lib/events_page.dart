@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'event_detail_page.dart';
 
 class EventsPage extends StatefulWidget {
-  const EventsPage({super.key});
+  EventsPage({super.key});
 
   @override
   State<EventsPage> createState() => _EventsPageState();
@@ -17,9 +17,20 @@ class _EventsPageState extends State<EventsPage> {
   List<dynamic> _clubs = [];
   bool _loading = true;
   String? _error;
-  
+  String _fmtYmd(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
   int? _userClubId;
   bool _isAdmin = false;
+
+  // Same helper as MembersPage
+  int? _toInt(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v);
+    return null;
+  }
 
   @override
   void initState() {
@@ -31,7 +42,7 @@ class _EventsPageState extends State<EventsPage> {
     final prefs = await SharedPreferences.getInstance();
     _userClubId = prefs.getInt('club_id');
     _isAdmin = prefs.getBool('is_admin') ?? false;
-    _load();
+    _load(); // do not setState here; _load() handles it
   }
 
   Future<void> _load() async {
@@ -39,25 +50,23 @@ class _EventsPageState extends State<EventsPage> {
       _loading = true;
       _error = null;
     });
+
     try {
-      final clubParam = _userClubId != null ? '?club_id=$_userClubId' : '';
-      final res = await http.get(Uri.parse('http://localhost:8080/events$clubParam'));
+      final url = _userClubId == null
+          ? 'http://localhost:8080/events'
+          : 'http://localhost:8080/events?club_id=$_userClubId';
+      final res = await http.get(Uri.parse(url));
       if (res.statusCode == 200) {
-        setState(() {
-          _events = (json.decode(res.body) as List).cast<Map<String, dynamic>>();
-          _loading = false;
-        });
+        _events = (json.decode(res.body) as List);
       } else {
-        setState(() {
-          _error = 'Failed: ${res.statusCode}';
-          _loading = false;
-        });
+        _error = 'Failed to load events: ${res.statusCode}';
       }
     } catch (e) {
-      setState(() {
-        _error = 'Error: $e';
-        _loading = false;
-      });
+      _error = 'Error: $e';
+    } finally {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -75,7 +84,37 @@ class _EventsPageState extends State<EventsPage> {
     }
   }
 
+  Future<void> _sendEventNotificationEmails(int eventId) async {
+    try {
+      final res = await http.post(
+        Uri.parse('http://localhost:8080/events/$eventId/notify'),
+        headers: {'Content-Type': 'application/json'},
+      );
+      if (!mounted) return;
+
+      if (res.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('✉️ Email notifications sent to all members'), backgroundColor: Colors.green),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('⚠️ Emails failed to send: ${res.body}'), backgroundColor: Colors.orange),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('⚠️ Email error: $e'), backgroundColor: Colors.orange),
+      );
+    }
+  }
+
   Future<void> _openCreateEventDialog() async {
+    if (!_isAdmin) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Admin access required')));
+      return;
+    }
+
     await _loadEventTypes();
     await _loadClubs();
     if (!mounted) return;
@@ -99,20 +138,34 @@ class _EventsPageState extends State<EventsPage> {
                 DropdownButtonFormField<int>(
                   value: eventTypeId,
                   decoration: const InputDecoration(labelText: 'Event Type'),
-                  items: _eventTypes.map((et) {
-                    final id = (et['id'] as num).toInt();
-                    return DropdownMenuItem(value: id, child: Text(et['name'].toString()));
-                  }).toList(),
+                  items: _eventTypes
+                      .map((et) {
+                        final id = _toInt(et['id']);
+                        if (id == null) return null;
+                        return DropdownMenuItem<int>(
+                          value: id,
+                          child: Text(et['name']?.toString() ?? et['id'].toString()),
+                        );
+                      })
+                      .whereType<DropdownMenuItem<int>>()
+                      .toList(),
                   onChanged: (v) => setDialogState(() => eventTypeId = v),
                 ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<int>(
                   value: clubId,
                   decoration: const InputDecoration(labelText: 'Club'),
-                  items: _clubs.map((c) {
-                    final id = (c['id'] as num).toInt();
-                    return DropdownMenuItem(value: id, child: Text(c['name'].toString()));
-                  }).toList(),
+                  items: _clubs
+                      .map((c) {
+                        final id = _toInt(c['id']);
+                        if (id == null) return null;
+                        return DropdownMenuItem<int>(
+                          value: id,
+                          child: Text(c['name']?.toString() ?? c['id'].toString()),
+                        );
+                      })
+                      .whereType<DropdownMenuItem<int>>()
+                      .toList(),
                   onChanged: (v) => setDialogState(() => clubId = v),
                 ),
                 const SizedBox(height: 8),
@@ -137,7 +190,7 @@ class _EventsPageState extends State<EventsPage> {
                 TextField(
                   controller: notesCtrl,
                   maxLines: 3,
-                  decoration: const InputDecoration(labelText: 'Notes (optional)', border: OutlineInputBorder()),
+                  decoration: const InputDecoration(labelText: 'Notes (optional)'),  
                 ),
               ],
             ),
@@ -152,36 +205,68 @@ class _EventsPageState extends State<EventsPage> {
 
     if (ok != true || eventTypeId == null || clubId == null || date == null) return;
 
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          duration: Duration(seconds: 30),
+          content: Row(
+            children: [
+              SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+              SizedBox(width: 16),
+              Text('Creating event...'),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final d = date!;
+    final eventDate = _fmtYmd(d);
+    
     final post = await http.post(
       Uri.parse('http://localhost:8080/events'),
       headers: {'Content-Type': 'application/json'},
       body: json.encode({
         'event_type_id': eventTypeId,
         'lions_club_id': clubId,
-        'event_date': '${date!.year}-${date!.month.toString().padLeft(2, '0')}-${date!.day.toString().padLeft(2, '0')}',
+        'event_date': eventDate,
         'location': locationCtrl.text,
         'notes': notesCtrl.text,
       }),
     );
 
     if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
 
     if (post.statusCode == 201) {
+      final responseData = json.decode(post.body);
+      final newEventId = _toInt(responseData['id']) ?? int.tryParse(responseData['id']?.toString() ?? '0') ?? 0;
+
       await _load();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Event created')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Event created successfully')));
+      if (newEventId != 0) {
+        await _sendEventNotificationEmails(newEventId);
+      }
     } else {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: ${post.body}')));
     }
   }
 
   Future<void> _openEditEventDialog(Map<String, dynamic> event) async {
+    if (!_isAdmin) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Admin access required')));
+      return;
+    }
+
     await _loadEventTypes();
     await _loadClubs();
     if (!mounted) return;
 
-    int? eventTypeId = event['event_type_id'] as int?;
-    int? clubId = event['club_id'] as int?;
-    DateTime? date = event['date'] != null ? DateTime.tryParse(event['date'].toString()) : null;
+    int? eventTypeId = _toInt(event['event_type_id']);
+    int? clubId = _toInt(event['club_id'] ?? event['lions_club_id']);
+    DateTime? date = event['date'] != null
+        ? DateTime.tryParse(event['date'].toString())
+        : (event['event_date'] != null ? DateTime.tryParse(event['event_date'].toString()) : null);
     final locationCtrl = TextEditingController(text: event['location']?.toString() ?? '');
     final notesCtrl = TextEditingController(text: event['notes']?.toString() ?? '');
 
@@ -198,20 +283,34 @@ class _EventsPageState extends State<EventsPage> {
                 DropdownButtonFormField<int>(
                   value: eventTypeId,
                   decoration: const InputDecoration(labelText: 'Event Type'),
-                  items: _eventTypes.map((et) {
-                    final id = (et['id'] as num).toInt();
-                    return DropdownMenuItem(value: id, child: Text(et['name'].toString()));
-                  }).toList(),
+                  items: _eventTypes
+                      .map((et) {
+                        final id = _toInt(et['id']);
+                        if (id == null) return null;
+                        return DropdownMenuItem<int>(
+                          value: id,
+                          child: Text(et['name']?.toString() ?? et['id'].toString()),
+                        );
+                      })
+                      .whereType<DropdownMenuItem<int>>()
+                      .toList(),
                   onChanged: (v) => setDialogState(() => eventTypeId = v),
                 ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<int>(
                   value: clubId,
                   decoration: const InputDecoration(labelText: 'Club'),
-                  items: _clubs.map((c) {
-                    final id = (c['id'] as num).toInt();
-                    return DropdownMenuItem(value: id, child: Text(c['name'].toString()));
-                  }).toList(),
+                  items: _clubs
+                      .map((c) {
+                        final id = _toInt(c['id']);
+                        if (id == null) return null;
+                        return DropdownMenuItem<int>(
+                          value: id,
+                          child: Text(c['name']?.toString() ?? c['id'].toString()),
+                        );
+                      })
+                      .whereType<DropdownMenuItem<int>>()
+                      .toList(),
                   onChanged: (v) => setDialogState(() => clubId = v),
                 ),
                 const SizedBox(height: 8),
@@ -236,7 +335,7 @@ class _EventsPageState extends State<EventsPage> {
                 TextField(
                   controller: notesCtrl,
                   maxLines: 3,
-                  decoration: const InputDecoration(labelText: 'Notes (optional)', border: OutlineInputBorder()),
+                  decoration: const InputDecoration(labelText: 'Notes (optional)'),
                 ),
               ],
             ),
@@ -251,13 +350,16 @@ class _EventsPageState extends State<EventsPage> {
 
     if (ok != true || eventTypeId == null || clubId == null || date == null) return;
 
+    final d = date!;
+    final eventDate = _fmtYmd(d);
+    
     final put = await http.put(
       Uri.parse('http://localhost:8080/events/${event['id']}'),
       headers: {'Content-Type': 'application/json'},
       body: json.encode({
         'event_type_id': eventTypeId,
         'lions_club_id': clubId,
-        'event_date': '${date!.year}-${date!.month.toString().padLeft(2, '0')}-${date!.day.toString().padLeft(2, '0')}',
+        'event_date': eventDate,
         'location': locationCtrl.text,
         'notes': notesCtrl.text,
       }),
@@ -293,7 +395,6 @@ class _EventsPageState extends State<EventsPage> {
     if (ok != true) return;
 
     final res = await http.delete(Uri.parse('http://localhost:8080/events/$eventId'));
-
     if (!mounted) return;
 
     if (res.statusCode == 200) {
@@ -312,8 +413,6 @@ class _EventsPageState extends State<EventsPage> {
         backgroundColor: Colors.red,
         actions: [
           IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
-          if (_isAdmin)
-            IconButton(icon: const Icon(Icons.add), onPressed: _openCreateEventDialog),
         ],
       ),
       body: _loading
@@ -338,51 +437,36 @@ class _EventsPageState extends State<EventsPage> {
                               const DataColumn(label: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold))),
                           ],
                           rows: _events.map((e) {
+                            final eventId = _toInt(e['id']) ?? 0;
                             return DataRow(
                               cells: [
                                 DataCell(
-                                  Text(e['event_type'] ?? ''),
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => EventDetailPage(eventId: e['id']),
-                                      ),
-                                    );
-                                  },
+                                  Text(e['event_type']?.toString() ?? ''),
+                                  onTap: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(builder: (_) => EventDetailPage(eventId: eventId)),
+                                  ),
                                 ),
                                 DataCell(
-                                  Text(e['club_name'] ?? ''),
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => EventDetailPage(eventId: e['id']),
-                                      ),
-                                    );
-                                  },
+                                  Text(e['club_name']?.toString() ?? ''),
+                                  onTap: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(builder: (_) => EventDetailPage(eventId: eventId)),
+                                  ),
                                 ),
                                 DataCell(
-                                  Text(e['date']?.toString() ?? ''),
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => EventDetailPage(eventId: e['id']),
-                                      ),
-                                    );
-                                  },
+                                  Text(e['date']?.toString() ?? e['event_date']?.toString() ?? ''),
+                                  onTap: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(builder: (_) => EventDetailPage(eventId: eventId)),
+                                  ),
                                 ),
                                 DataCell(
                                   Text(e['location']?.toString() ?? ''),
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => EventDetailPage(eventId: e['id']),
-                                      ),
-                                    );
-                                  },
+                                  onTap: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(builder: (_) => EventDetailPage(eventId: eventId)),
+                                  ),
                                 ),
                                 if (_isAdmin)
                                   DataCell(
@@ -391,12 +475,12 @@ class _EventsPageState extends State<EventsPage> {
                                       children: [
                                         IconButton(
                                           icon: const Icon(Icons.edit, color: Colors.blue, size: 20),
-                                          onPressed: () => _openEditEventDialog(e),
+                                          onPressed: () => _openEditEventDialog(e as Map<String, dynamic>),
                                           tooltip: 'Edit',
                                         ),
                                         IconButton(
                                           icon: const Icon(Icons.delete, color: Colors.red, size: 20),
-                                          onPressed: () => _deleteEvent(e['id'] as int),
+                                          onPressed: () => _deleteEvent(eventId),
                                           tooltip: 'Delete',
                                         ),
                                       ],
@@ -408,6 +492,14 @@ class _EventsPageState extends State<EventsPage> {
                         ),
                       ),
                     ),
+      floatingActionButton: _isAdmin
+          ? FloatingActionButton.extended(
+              onPressed: _openCreateEventDialog,
+              icon: const Icon(Icons.add),
+              label: const Text('Create Event'),
+              backgroundColor: Colors.red,
+            )
+          : null,
     );
   }
 }

@@ -27,67 +27,7 @@ class LionsApp extends StatelessWidget {
   }
 }
 
-class MainScreen extends StatefulWidget {
-  const MainScreen({super.key});
-
-  @override
-  State<MainScreen> createState() => _MainScreenState();
-}
-
-class _MainScreenState extends State<MainScreen> {
-  int _selectedIndex = 0;
-
-  // Not const: allows pages whose constructors aren't const
-  final List<Widget> _pages = [
-    const HomePage(),
-    members.MembersPage(),
-    events.EventsPage(),
-    calendar.CalendarPage(),
-    news.NewsPage(),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Row(
-        children: [
-          NavigationRail(
-            selectedIndex: _selectedIndex,
-            onDestinationSelected: (index) {
-              setState(() => _selectedIndex = index);
-            },
-            labelType: NavigationRailLabelType.all,
-            destinations: const [
-              NavigationRailDestination(
-                icon: Icon(Icons.home),
-                label: Text('Home'),
-              ),
-              NavigationRailDestination(
-                icon: Icon(Icons.group),
-                label: Text('Members'),
-              ),
-              NavigationRailDestination(
-                icon: Icon(Icons.event),
-                label: Text('Events'),
-              ),
-              NavigationRailDestination(
-                icon: Icon(Icons.calendar_month),
-                label: Text('Calendar'),
-              ),
-              NavigationRailDestination(
-                icon: Icon(Icons.article),
-                label: Text('News'),
-              ),
-            ],
-          ),
-          const VerticalDivider(thickness: 1, width: 1),
-          Expanded(child: _pages[_selectedIndex]),
-        ],
-      ),
-    );
-  }
-}
-
+// Move HomePage HERE, before MainScreen
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
@@ -156,6 +96,60 @@ class HomePage extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class MainScreen extends StatefulWidget {
+  const MainScreen({super.key});
+
+  @override
+  State<MainScreen> createState() => _MainScreenState();
+}
+
+// ...existing code...
+class _MainScreenState extends State<MainScreen> {
+  int _selectedIndex = 0;
+
+  late final List<Widget> _pages;
+
+  @override
+  void initState() {
+    super.initState();
+    _pages = [
+      HomePage(),
+      members.MembersPage(),
+      events.EventsPage(),
+      calendar.CalendarPage(),
+      news.NewsPage(),
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Row(
+        children: [
+          NavigationRail(
+            selectedIndex: _selectedIndex,
+            onDestinationSelected: (index) {
+              setState(() => _selectedIndex = index);
+            },
+            labelType: NavigationRailLabelType.all,
+            destinations: const [
+              NavigationRailDestination(icon: Icon(Icons.home), label: Text('Home')),
+              NavigationRailDestination(icon: Icon(Icons.group), label: Text('Members')),
+              NavigationRailDestination(icon: Icon(Icons.event), label: Text('Events')),
+              NavigationRailDestination(icon: Icon(Icons.calendar_month), label: Text('Calendar')),
+              NavigationRailDestination(icon: Icon(Icons.article), label: Text('News')),
+            ],
+          ),
+          const VerticalDivider(thickness: 1, width: 1),
+          Expanded(
+            child: _pages[_selectedIndex],
+          ),
+        ],
       ),
     );
   }

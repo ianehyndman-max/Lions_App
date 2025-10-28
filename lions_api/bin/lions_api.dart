@@ -4,6 +4,8 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as io;
 import 'package:shelf_cors_headers/shelf_cors_headers.dart';
 import 'package:mysql_client/mysql_client.dart';
+import 'package:mailer/mailer.dart';
+import 'package:mailer/smtp_server.dart';
 
 Future<MySQLConnection> _connect() async {
   final conn = await MySQLConnection.createConnection(
@@ -16,6 +18,33 @@ Future<MySQLConnection> _connect() async {
   await conn.connect();
   stderr.writeln('✅ Connected to MySQL');
   return conn;
+}
+
+// ---------------- Email Configuration ----------------
+// TODO: Replace with your actual Gmail credentials
+const String _smtpUsername = 'ianehyndman@gmail.com';
+const String _smtpPassword = 'wtms yhne yutr unms';  // Use App Password, not regular password
+
+Future<void> _sendEmail({
+  required String to,
+  required String subject,
+  required String body,
+}) async {
+  final smtpServer = gmail(_smtpUsername, _smtpPassword);
+  
+  final message = Message()
+    ..from = Address(_smtpUsername, 'Lions Club')
+    ..recipients.add(to)
+    ..subject = subject
+    ..html = body;
+
+  try {
+    await send(message, smtpServer);
+    stderr.writeln('✉️ Email sent to $to');
+  } catch (e) {
+    stderr.writeln('❌ Failed to send email to $to: $e');
+    rethrow;
+  }
 }
 
 // ---------------- Members ----------------
@@ -232,6 +261,8 @@ Future<Response> _eventDetails(Request req, String eventId) async {
         et.name AS event_type,
         lc.id AS club_id,
         lc.name AS club_name,
+        lc.email AS club_email,
+        lc.phone_number AS club_phone,
         e.event_date AS date,
         e.location,
         e.notes
@@ -279,6 +310,8 @@ Future<Response> _eventDetails(Request req, String eventId) async {
         'event_type': e['event_type'],
         'club_id': e['club_id'],
         'club_name': e['club_name'],
+        'club_email': e['club_email'],
+        'club_phone': e['club_phone'],
         'date': e['date']?.toString() ?? '',
         'location': e['location'],
         'notes': e['notes'],
@@ -289,6 +322,151 @@ Future<Response> _eventDetails(Request req, String eventId) async {
   } catch (err, st) {
     stderr.writeln('❌ Error in _eventDetails: $err\n$st');
     return Response.internalServerError(body: 'Error: $err');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _notifyEventMembers(Request req, String eventId) async {
+  stderr.writeln('📧 POST /events/$eventId/notify');
+  MySQLConnection? conn;
+  try {
+    conn = await _connect();
+
+    // Get event details
+    final eventResult = await conn.execute('''
+      SELECT 
+        e.id,
+        et.name AS event_type,
+        lc.name AS club_name,
+        e.event_date,
+        e.location,
+        e.notes,
+        e.lions_club_id
+      FROM events e
+      LEFT JOIN event_types et ON e.event_type_id = et.id
+      LEFT JOIN lions_club lc ON e.lions_club_id = lc.id
+      WHERE e.id = :eventId
+    ''', {'eventId': eventId});
+
+    if (eventResult.rows.isEmpty) {
+      return Response.notFound('Event not found');
+    }
+
+    final event = eventResult.rows.first.assoc();
+    final clubId = event['lions_club_id'];
+
+    // Get all members from this club with valid emails
+    final membersResult = await conn.execute('''
+      SELECT id, name, email
+      FROM members
+      WHERE lions_club_id = :clubId
+        AND email IS NOT NULL
+        AND email != ''
+    ''', {'clubId': clubId.toString()});
+
+    if (membersResult.rows.isEmpty) {
+      return Response.ok(
+        jsonEncode({'message': 'No members with email addresses found'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+
+    // Get volunteer roles for this event
+    final rolesResult = await conn.execute('''
+      SELECT 
+        r.role_name,
+        r.time_in,
+        r.time_out
+      FROM roles r
+      JOIN events e ON e.id = :eventId
+      WHERE r.event_type_id = e.event_type_id
+      ORDER BY r.time_in, r.role_name
+    ''', {'eventId': eventId});
+
+    final rolesHtml = StringBuffer();
+    rolesHtml.write('<h3>Volunteer Roles:</h3><ul>');
+    for (final row in rolesResult.rows) {
+      final r = row.assoc();
+      rolesHtml.write('<li>${r['role_name']}: ${r['time_in']} - ${r['time_out']}</li>');
+    }
+    rolesHtml.write('</ul>');
+
+    // Compose email
+    final subject = '🦁 New Event: ${event['event_type']} - ${event['club_name']}';
+    final body = '''
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+    .header { background-color: #d32f2f; color: white; padding: 20px; text-align: center; }
+    .content { padding: 20px; }
+    .details { background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 15px 0; }
+    .details p { margin: 8px 0; }
+    .label { font-weight: bold; color: #d32f2f; }
+    .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🦁 New Lions Club Event</h1>
+  </div>
+  <div class="content">
+    <p>Dear Member,</p>
+    <p>A new event has been scheduled for ${event['club_name']}. We need volunteers!</p>
+    
+    <div class="details">
+      <p><span class="label">Event:</span> ${event['event_type']}</p>
+      <p><span class="label">Date:</span> ${event['event_date']}</p>
+      <p><span class="label">Location:</span> ${event['location'] ?? 'TBA'}</p>
+      ${event['notes']?.toString().isNotEmpty ?? false ? '<p><span class="label">Notes:</span> ${event['notes']}</p>' : ''}
+    </div>
+
+    ${rolesHtml.toString()}
+
+    <p><strong>Please log in to the Lions App to sign up for a volunteer role.</strong></p>
+    
+    <p>We appreciate your service!</p>
+  </div>
+  <div class="footer">
+    <p>This is an automated message from the Lions Club Event Management System</p>
+  </div>
+</body>
+</html>
+''';
+
+    // Send emails to all members
+    int successCount = 0;
+    int failCount = 0;
+    
+    for (final row in membersResult.rows) {
+      final member = row.assoc();
+      final email = member['email']?.toString() ?? '';
+      
+      if (email.isNotEmpty) {
+        try {
+          await _sendEmail(to: email, subject: subject, body: body);
+          successCount++;
+        } catch (e) {
+          stderr.writeln('❌ Failed to send to ${member['name']} ($email): $e');
+          failCount++;
+        }
+      }
+    }
+
+    return Response.ok(
+      jsonEncode({
+        'success': true,
+        'sent': successCount,
+        'failed': failCount,
+        'message': 'Emails sent to $successCount members${failCount > 0 ? ', $failCount failed' : ''}'
+      }),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _notifyEventMembers: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
   } finally {
     await conn?.close();
   }
@@ -386,7 +564,7 @@ Future<Response> _createEvent(Request req) async {
   try {
     conn = await _connect();
     await conn.execute(
-      'INSERT INTO events (event_type_id, lions_club_id, event_date, location) VALUES (:et,:club,:date,:loc:notes)',
+      'INSERT INTO events (event_type_id, lions_club_id, event_date, location, notes) VALUES (:et,:club,:date,:loc,:notes)',
       {'et': et.toString(), 'club': club.toString(), 'date': date.toString(), 'loc': loc, 'notes': notes},
     );
     final idRes = await conn.execute('SELECT LAST_INSERT_ID() AS id');
@@ -503,9 +681,15 @@ void main() async {
         if (req.method == 'POST' && volunteer != null) {
           return _assignVolunteer(req, volunteer.group(1)!);
         }
+        
+        // Email notifications
+        final notify = RegExp(r'^events/(\d+)/notify$').firstMatch(req.url.path);
+        if (req.method == 'POST' && notify != null) {
+          return _notifyEventMembers(req, notify.group(1)!);
+        }
 
         // Reference
-        if (req.method == 'GET' && req.url.path == 'event_types') return _eventTypes(req);
+        if (req.method == 'GET' && req.url.path == 'event-types') return _eventTypes(req);
         if (req.method == 'GET' && req.url.path == 'clubs') return _clubs(req);
 
         return Response.notFound('Not Found');

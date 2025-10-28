@@ -6,5 +6,8 @@ environment:
 dependencies:
   shelf: ^1.4.1
   shelf_cors_headers: ^0.1.5
-  mysql_client: ^0.0.27
-  shared_preferences: ^2.2.2 
+  mysql_client: ^0.0.27 
+  mailer: ^6.1.0
+
+dev_dependencies:
+  lints: ^2.0.0
