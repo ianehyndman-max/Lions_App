@@ -2,6 +2,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:printing/printing.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 
 class EventDetailPage extends StatefulWidget {
   final dynamic eventId;
@@ -19,6 +22,8 @@ class _EventDetailPageState extends State<EventDetailPage> {
   
   int? _userMemberId;
   bool _isAdmin = false;
+  String? _clubEmail;
+  String? _clubPhone;
   
   final TextEditingController _notesController = TextEditingController();
   bool _isEditingNotes = false;
@@ -55,6 +60,8 @@ class _EventDetailPageState extends State<EventDetailPage> {
           _event = data['event'] as Map<String, dynamic>;
           _roles = data['roles'] as List<dynamic>;
           _notesController.text = _event!['notes']?.toString() ?? '';
+          _clubEmail = _event!['club_email']?.toString();
+          _clubPhone = _event!['club_phone']?.toString();
           _loading = false;
         });
       } else {
@@ -71,11 +78,74 @@ class _EventDetailPageState extends State<EventDetailPage> {
     }
   }
 
+    Future<void> _printEvent() async {
+    if (_event == null) return;
+
+    final pdf = pw.Document();
+
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        build: (pw.Context context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                '${_event!['event_type']} - ${_event!['club_name']}',
+                style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
+              ),
+              pw.SizedBox(height: 20),
+              pw.Text('Date: ${_event!['date'] ?? ''}', style: const pw.TextStyle(fontSize: 14)),
+              pw.Text('Location: ${_event!['location'] ?? ''}', style: const pw.TextStyle(fontSize: 14)),
+              pw.SizedBox(height: 20),
+              pw.Text('Volunteer Roles', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
+              pw.SizedBox(height: 10),
+              pw.TableHelper.fromTextArray(
+                headers: ['Role', 'Time In', 'Time Out', 'Volunteer', 'Signature'],
+                data: _roles.map((r) {
+                  final volunteer = r['volunteer_name']?.toString() ?? 'Unassigned';
+                  return [
+                    r['role_name'] ?? '',
+                    r['time_in'] ?? '',
+                    r['time_out'] ?? '',
+                    volunteer,
+                    '', // Empty signature column
+                  ];
+                }).toList(),
+                headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                cellAlignment: pw.Alignment.centerLeft,
+                border: pw.TableBorder.all(),
+                columnWidths: {
+                  0: const pw.FlexColumnWidth(2),
+                  1: const pw.FlexColumnWidth(1.5),
+                  2: const pw.FlexColumnWidth(1.5),
+                  3: const pw.FlexColumnWidth(2),
+                  4: const pw.FlexColumnWidth(2.5), // Wider for signature
+                },
+              ),
+              pw.SizedBox(height: 20),
+              if (_event!['notes']?.toString().isNotEmpty ?? false) ...[
+                pw.Text('Notes', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
+                pw.SizedBox(height: 10),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(10),
+                  decoration: pw.BoxDecoration(border: pw.Border.all()),
+                  child: pw.Text(_event!['notes']?.toString() ?? ''),
+                ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+
+    await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf.save());
+  }
+
   Future<void> _saveNotes() async {
     if (_event == null) return;
     setState(() => _loading = true);
     try {
-      // Ensure IDs are integers
       final eventTypeId = _event!['event_type_id'] is int 
           ? _event!['event_type_id'] 
           : int.parse(_event!['event_type_id'].toString());
@@ -148,6 +218,64 @@ class _EventDetailPageState extends State<EventDetailPage> {
     } else {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: ${post.body}')));
     }
+  }
+
+  Future<void> _showChangeMyMindDialog() async {
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Change Your Mind?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'We understand that circumstances change!',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'To withdraw from your volunteer commitment, please contact the club secretary:',
+            ),
+            const SizedBox(height: 16),
+            if (_clubPhone != null && _clubPhone!.isNotEmpty) ...[
+              Row(
+                children: [
+                  const Icon(Icons.phone, size: 20),
+                  const SizedBox(width: 8),
+                  Text(_clubPhone!, style: const TextStyle(fontWeight: FontWeight.bold)),
+                ],
+              ),
+              const SizedBox(height: 8),
+            ],
+            if (_clubEmail != null && _clubEmail!.isNotEmpty) ...[
+              Row(
+                children: [
+                  const Icon(Icons.email, size: 20),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(_clubEmail!, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ],
+            if ((_clubPhone == null || _clubPhone!.isEmpty) && 
+                (_clubEmail == null || _clubEmail!.isEmpty)) ...[
+              const Text(
+                'Please contact your club secretary.',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _pickVolunteer(Map<String, dynamic> role) async {
@@ -229,6 +357,14 @@ class _EventDetailPageState extends State<EventDetailPage> {
       appBar: AppBar(
         title: Text(_event == null ? 'Event' : '${_event!['event_type']} · ${_event!['club_name']}'),
         backgroundColor: Colors.red,
+        actions: [
+          if (_event != null)
+            IconButton(
+              icon: const Icon(Icons.print),
+              tooltip: 'Print Event Details',
+              onPressed: _printEvent,
+            ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -292,12 +428,18 @@ class _EventDetailPageState extends State<EventDetailPage> {
                                             onPressed: () => _pickVolunteer(r),
                                             child: Text(hasVolunteer ? 'Change' : 'Assign'),
                                           )
-                                        : hasVolunteer
-                                            ? const SizedBox.shrink()
-                                            : TextButton(
-                                                onPressed: () => _volunteerSelf(r),
-                                                child: const Text('Volunteer'),
-                                              ),
+                                        : isCurrentUser
+                                            ? TextButton(
+                                                onPressed: _showChangeMyMindDialog,
+                                                style: TextButton.styleFrom(foregroundColor: Colors.orange),
+                                                child: const Text('Change My Mind'),
+                                              )
+                                            : hasVolunteer
+                                                ? const SizedBox.shrink()
+                                                : TextButton(
+                                                    onPressed: () => _volunteerSelf(r),
+                                                    child: const Text('Volunteer'),
+                                                  ),
                                   ),
                                 ]);
                               }).toList(),
