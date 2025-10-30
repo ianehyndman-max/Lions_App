@@ -275,8 +275,26 @@ Future<Response> _eventDetails(Request req, String eventId) async {
     if (eventResult.rows.isEmpty) return Response.notFound('Event not found');
 
     final e = eventResult.rows.first.assoc();
+    final isOther = (e['event_type'] ?? '').toString() == 'Other';
 
-    final rolesResult = await conn.execute('''
+    // Roles: for "Other" use event-specific roles only; else use template roles
+    final rolesResult = await conn.execute(isOther
+      ? '''
+      SELECT 
+        r.id AS role_id,
+        r.role_name,
+        r.time_in,
+        r.time_out,
+        m.id AS member_id,
+        m.name AS volunteer_name
+      FROM roles r
+      JOIN events ev ON ev.id = :eventId
+      LEFT JOIN event_volunteers v ON v.role_id = r.id AND v.event_id = ev.id
+      LEFT JOIN members m ON m.id = v.member_id
+      WHERE r.event_id = ev.id
+      ORDER BY r.time_in, r.role_name
+    '''
+      : '''
       SELECT 
         r.id AS role_id,
         r.role_name,
@@ -288,6 +306,7 @@ Future<Response> _eventDetails(Request req, String eventId) async {
       JOIN events ev ON ev.id = :eventId AND r.event_type_id = ev.event_type_id
       LEFT JOIN event_volunteers v ON v.role_id = r.id AND v.event_id = ev.id
       LEFT JOIN members m ON m.id = v.member_id
+      WHERE r.event_id IS NULL      -- template roles only
       ORDER BY r.time_in, r.role_name
     ''', {'eventId': eventId});
 
@@ -327,6 +346,7 @@ Future<Response> _eventDetails(Request req, String eventId) async {
   }
 }
 
+// ...existing code...
 Future<Response> _notifyEventMembers(Request req, String eventId) async {
   stderr.writeln('📧 POST /events/$eventId/notify');
   MySQLConnection? conn;
@@ -355,6 +375,7 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
 
     final event = eventResult.rows.first.assoc();
     final clubId = event['lions_club_id'];
+    final isOther = (event['event_type'] ?? '').toString() == 'Other';
 
     // Get all members from this club with valid emails
     final membersResult = await conn.execute('''
@@ -372,17 +393,27 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
       );
     }
 
-    // Get volunteer roles for this event
-    final rolesResult = await conn.execute('''
-      SELECT 
-        r.role_name,
-        r.time_in,
-        r.time_out
-      FROM roles r
-      JOIN events e ON e.id = :eventId
-      WHERE r.event_type_id = e.event_type_id
-      ORDER BY r.time_in, r.role_name
-    ''', {'eventId': eventId});
+    // Roles for email: template roles for normal types, event-specific for "Other"
+    final rolesResult = await conn.execute(isOther
+      ? '''
+        SELECT r.role_name, r.time_in, r.time_out
+        FROM roles r
+        WHERE r.event_id = :eventId
+        ORDER BY r.time_in, r.role_name
+      '''
+      : '''
+        SELECT r.role_name, r.time_in, r.time_out
+        FROM roles r
+        JOIN events e ON e.id = :eventId
+        WHERE r.event_type_id = e.event_type_id
+          AND r.event_id IS NULL     -- template roles only
+        ORDER BY r.time_in, r.role_name
+      ''', {'eventId': eventId});
+
+    // If "Other" has no roles yet, block sending to avoid empty email content
+    if (isOther && rolesResult.rows.isEmpty) {
+      return Response(400, body: 'No roles defined for this event yet.');
+    }
 
     final rolesHtml = StringBuffer();
     rolesHtml.write('<h3>Volunteer Roles:</h3><ul>');
@@ -392,7 +423,7 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
     }
     rolesHtml.write('</ul>');
 
-    // Compose email
+    // Compose and send emails (unchanged body except rolesHtml)
     final subject = '🦁 New Event: ${event['event_type']} - ${event['club_name']}';
     final body = '''
 <!DOCTYPE html>
@@ -425,7 +456,7 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
 
     ${rolesHtml.toString()}
 
-    <p><strong>Please log in to the Lions App to sign up for a volunteer role.<br>If you don't have access to the App, please contact our glorious leaders Michael and Sharon to put your name forward.</strong></p>
+    <p><strong>Please log in to the Lions App to sign up for a volunteer role.</strong></p>
     
     <p>We appreciate your service!</p>
   </div>
@@ -436,14 +467,11 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
 </html>
 ''';
 
-    // Send emails to all members
     int successCount = 0;
     int failCount = 0;
-    
     for (final row in membersResult.rows) {
       final member = row.assoc();
       final email = member['email']?.toString() ?? '';
-      
       if (email.isNotEmpty) {
         try {
           await _sendEmail(to: email, subject: subject, body: body);
@@ -472,6 +500,7 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
   }
 }
 
+
 Future<Response> _assignVolunteer(Request req, String eventId) async {
   stderr.writeln('🟠 POST /events/$eventId/volunteer');
   final body = await req.readAsString();
@@ -486,13 +515,31 @@ Future<Response> _assignVolunteer(Request req, String eventId) async {
   try {
     conn = await _connect();
 
-    final chk = await conn.execute('''
-      SELECT 1
-      FROM roles r
-      JOIN events e ON e.id = :eventId
-      WHERE r.id = :roleId AND r.event_type_id = e.event_type_id
-      LIMIT 1
-    ''', {'eventId': eventId.toString(), 'roleId': roleId.toString()});
+    // Determine if event type is "Other"
+    final etRes = await conn.execute('''
+      SELECT et.name AS et_name
+      FROM events e
+      JOIN event_types et ON et.id = e.event_type_id
+      WHERE e.id = :eventId
+    ''', {'eventId': eventId.toString()});
+    final etName = etRes.rows.isNotEmpty ? (etRes.rows.first.assoc()['et_name'] ?? '').toString() : '';
+    final isOther = etName == 'Other';
+
+    final chk = await conn.execute(isOther
+      ? '''
+        SELECT 1 FROM roles r
+        WHERE r.id = :roleId AND r.event_id = :eventId
+        LIMIT 1
+      '''
+      : '''
+        SELECT 1
+        FROM roles r
+        JOIN events e ON e.id = :eventId
+        WHERE r.id = :roleId
+          AND r.event_type_id = e.event_type_id
+          AND r.event_id IS NULL     -- template role
+        LIMIT 1
+      ''', {'eventId': eventId.toString(), 'roleId': roleId.toString()});
     if (chk.rows.isEmpty) return Response(400, body: 'Role not valid for event');
 
     await conn.execute('''
@@ -546,6 +593,8 @@ Future<Response> _clubs(Request req) async {
 
 // ---------------- Events CRUD ----------------
 
+
+// ...existing code...
 Future<Response> _createEvent(Request req) async {
   final body = await req.readAsString();
   if (body.isEmpty) return Response(400, body: 'Missing body');
@@ -563,27 +612,80 @@ Future<Response> _createEvent(Request req) async {
   MySQLConnection? conn;
   try {
     conn = await _connect();
+
+    // Start a simple transaction
+    await conn.execute('START TRANSACTION');
+
     await conn.execute(
       'INSERT INTO events (event_type_id, lions_club_id, event_date, location, notes) VALUES (:et,:club,:date,:loc,:notes)',
       {'et': et.toString(), 'club': club.toString(), 'date': date.toString(), 'loc': loc, 'notes': notes},
     );
     final idRes = await conn.execute('SELECT LAST_INSERT_ID() AS id');
-    final newId = idRes.rows.first.assoc()['id'];
+    final newId = idRes.rows.first.assoc()['id']?.toString();
+    if (newId == null || newId.isEmpty) {
+      await conn.execute('ROLLBACK');
+      return Response.internalServerError(body: 'Failed to create event id');
+    }
 
-    await conn.execute('''
-      INSERT INTO event_volunteers (event_id, role_id, member_id)
-      SELECT :eventId, r.id, NULL
-      FROM roles r
-      WHERE r.event_type_id = :eventTypeId
-    ''', {'eventId': newId.toString(), 'eventTypeId': et.toString()});
+    final etNameRes = await conn.execute('SELECT name FROM event_types WHERE id = :id', {'id': et.toString()});
+    final etName = etNameRes.rows.isNotEmpty ? (etNameRes.rows.first.assoc()['name'] ?? '').toString() : '';
 
+    if (etName == 'Other') {
+      final roles = data['roles'];
+      if (roles is List) {
+        for (final r in roles) {
+          if (r is Map) {
+            final roleName = (r['role_name'] ?? '').toString().trim();
+            if (roleName.isEmpty) continue;
+            final timeIn = (r['time_in'] ?? '').toString();
+            final timeOut = (r['time_out'] ?? '').toString();
+
+            // Insert event-specific role with BOTH type and event id
+            await conn.execute('''
+              INSERT INTO roles (event_type_id, event_id, role_name, time_in, time_out)
+              VALUES (:et, :eventId, :name, :timeIn, :timeOut)
+            ''', {
+              'et': et.toString(),
+              'eventId': newId,
+              'name': roleName,
+              'timeIn': timeIn,
+              'timeOut': timeOut,
+            });
+
+            final ridRes = await conn.execute('SELECT LAST_INSERT_ID() AS id');
+            final newRoleId = ridRes.rows.first.assoc()['id']?.toString();
+            if (newRoleId != null && newRoleId.isNotEmpty) {
+              await conn.execute('''
+                INSERT INTO event_volunteers (event_id, role_id, member_id)
+                VALUES (:eventId, :roleId, NULL)
+                ON DUPLICATE KEY UPDATE member_id = member_id
+              ''', {'eventId': newId, 'roleId': newRoleId});
+            }
+          }
+        }
+      }
+    } else {
+      // Pull template roles ONLY (event_id IS NULL)
+      await conn.execute('''
+        INSERT INTO event_volunteers (event_id, role_id, member_id)
+        SELECT :eventId, r.id, NULL
+        FROM roles r
+        WHERE r.event_type_id = :eventTypeId
+          AND r.event_id IS NULL
+      ''', {'eventId': newId, 'eventTypeId': et.toString()});
+    }
+
+    await conn.execute('COMMIT');
     return Response(201, body: jsonEncode({'id': newId}), headers: {'Content-Type': 'application/json'});
   } catch (e) {
+    try { await conn?.execute('ROLLBACK'); } catch (_) {}
     return Response.internalServerError(body: 'Error: $e');
   } finally {
     await conn?.close();
   }
 }
+// ...existing code...
+
 
 Future<Response> _updateEvent(Request req, String id) async {
   final body = await req.readAsString();
@@ -646,6 +748,106 @@ Future<Response> _deleteEvent(Request req, String id) async {
   }
 }
 
+// ...existing code...
+Future<Response> _listEventRoles(Request req, String eventId) async {
+  MySQLConnection? conn;
+  try {
+    conn = await _connect();
+    final r = await conn.execute('''
+      SELECT id AS role_id, role_name, time_in, time_out
+      FROM roles
+      WHERE event_id = :eventId
+      ORDER BY time_in, role_name
+    ''', {'eventId': eventId});
+    final list = [for (final row in r.rows) row.assoc()];
+    return Response.ok(jsonEncode(list), headers: {'Content-Type': 'application/json'});
+  } catch (e) {
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _createEventRole(Request req, String eventId) async {
+  final body = await req.readAsString();
+  if (body.isEmpty) return Response(400, body: 'Missing body');
+  final data = jsonDecode(body) as Map<String, dynamic>;
+  final name = (data['role_name'] ?? '').toString().trim();
+  final timeIn = (data['time_in'] ?? '').toString();
+  final timeOut = (data['time_out'] ?? '').toString();
+  if (name.isEmpty) return Response(400, body: 'role_name required');
+
+  MySQLConnection? conn;
+  try {
+    conn = await _connect();
+    await conn.execute('''
+      INSERT INTO roles (event_type_id, event_id, role_name, time_in, time_out)
+      VALUES (NULL, :eventId, :name, :timeIn, :timeOut)
+    ''', {'eventId': eventId, 'name': name, 'timeIn': timeIn, 'timeOut': timeOut});
+    final idRes = await conn.execute('SELECT LAST_INSERT_ID() AS id');
+    final newRoleId = idRes.rows.first.assoc()['id'];
+
+    await conn.execute('''
+      INSERT INTO event_volunteers (event_id, role_id, member_id)
+      VALUES (:eventId, :roleId, NULL)
+      ON DUPLICATE KEY UPDATE member_id = member_id
+    ''', {'eventId': eventId, 'roleId': newRoleId.toString()});
+
+    return Response(201, body: jsonEncode({'role_id': newRoleId}), headers: {'Content-Type': 'application/json'});
+  } catch (e) {
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _updateEventRole(Request req, String eventId, String roleId) async {
+  final body = await req.readAsString();
+  if (body.isEmpty) return Response(400, body: 'Missing body');
+  final data = jsonDecode(body) as Map<String, dynamic>;
+  final name = (data['role_name'] ?? '').toString().trim();
+  final timeIn = (data['time_in'] ?? '').toString();
+  final timeOut = (data['time_out'] ?? '').toString();
+
+  MySQLConnection? conn;
+  try {
+    conn = await _connect();
+    final r = await conn.execute('''
+      UPDATE roles
+      SET role_name = :name, time_in = :timeIn, time_out = :timeOut
+      WHERE id = :roleId AND event_id = :eventId
+    ''', {'name': name, 'timeIn': timeIn, 'timeOut': timeOut, 'roleId': roleId, 'eventId': eventId});
+    if ((r.affectedRows ?? 0) == 0) return Response.notFound('Role not found for this event');
+    return Response.ok(jsonEncode({'ok': true}), headers: {'Content-Type': 'application/json'});
+  } catch (e) {
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _deleteEventRole(Request req, String eventId, String roleId) async {
+  MySQLConnection? conn;
+  try {
+    conn = await _connect();
+
+    await conn.execute('DELETE FROM event_volunteers WHERE event_id = :eventId AND role_id = :roleId',
+        {'eventId': eventId, 'roleId': roleId});
+
+    final r = await conn.execute('DELETE FROM roles WHERE id = :roleId AND event_id = :eventId',
+        {'roleId': roleId, 'eventId': eventId});
+    if ((r.affectedRows ?? 0) == 0) return Response.notFound('Role not found for this event');
+
+    return Response.ok(jsonEncode({'ok': true}), headers: {'Content-Type': 'application/json'});
+  } catch (e) {
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+// ...existing code...
+
+
 // ---------------- Server ----------------
 
 void main() async {
@@ -676,6 +878,18 @@ void main() async {
           if (req.method == 'GET') return _eventDetails(req, eventDetail.group(1)!);
           if (req.method == 'PUT') return _updateEvent(req, eventDetail.group(1)!);
           if (req.method == 'DELETE') return _deleteEvent(req, eventDetail.group(1)!);
+        }
+
+        // Event-specific roles
+        final rolesList = RegExp(r'^events/(\d+)/roles$').firstMatch(req.url.path);
+        if (rolesList != null) {
+          if (req.method == 'GET') return _listEventRoles(req, rolesList.group(1)!);
+          if (req.method == 'POST') return _createEventRole(req, rolesList.group(1)!);
+        }
+        final roleDetail = RegExp(r'^events/(\d+)/roles/(\d+)$').firstMatch(req.url.path);
+        if (roleDetail != null) {
+          if (req.method == 'PUT') return _updateEventRole(req, roleDetail.group(1)!, roleDetail.group(2)!);
+          if (req.method == 'DELETE') return _deleteEventRole(req, roleDetail.group(1)!, roleDetail.group(2)!);
         }
         final volunteer = RegExp(r'^events/(\d+)/volunteer$').firstMatch(req.url.path);
         if (req.method == 'POST' && volunteer != null) {
