@@ -261,8 +261,8 @@ Future<Response> _eventDetails(Request req, String eventId) async {
         et.name AS event_type,
         lc.id AS club_id,
         lc.name AS club_name,
-        lc.email AS club_email,
-        lc.phone_number AS club_phone,
+        '' AS club_email,
+        '' AS club_phone,
         e.event_date AS date,
         e.location,
         e.notes
@@ -425,7 +425,7 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
 
     ${rolesHtml.toString()}
 
-    <p><strong>Please log in to the Lions App to sign up for a volunteer role.</strong></p>
+    <p><strong>Please log in to the Lions App to sign up for a volunteer role.<br>If you don't have access to the App, please contact our glorious leaders Michael and Sharon to put your name forward.</strong></p>
     
     <p>We appreciate your service!</p>
   </div>
@@ -689,7 +689,8 @@ void main() async {
         }
 
         // Reference
-        if (req.method == 'GET' && req.url.path == 'event-types') return _eventTypes(req);
+        if (req.method == 'GET' && req.url.path == 'event_types') return _eventTypes(req);
+        //if (req.method == 'GET' && req.url.path == 'event-types') return _eventTypes(req);
         if (req.method == 'GET' && req.url.path == 'clubs') return _clubs(req);
 
         return Response.notFound('Not Found');

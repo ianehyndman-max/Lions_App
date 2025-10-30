@@ -71,7 +71,8 @@ class _EventsPageState extends State<EventsPage> {
   }
 
   Future<void> _loadEventTypes() async {
-    final res = await http.get(Uri.parse('http://localhost:8080/event-types'));
+    //final res = await http.get(Uri.parse('http://localhost:8080/event-types'));
+    final res = await http.get(Uri.parse('http://localhost:8080/event_types'));
     if (res.statusCode == 200) {
       setState(() => _eventTypes = json.decode(res.body) as List);
     }
