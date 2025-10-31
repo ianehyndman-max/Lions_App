@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'event_detail_page.dart';
+import 'create_event_dialog.dart';
 
 class EventsPage extends StatefulWidget {
   EventsPage({super.key});
@@ -110,149 +111,27 @@ class _EventsPageState extends State<EventsPage> {
     }
   }
 
+  // ...existing code...
   Future<void> _openCreateEventDialog() async {
-    if (!_isAdmin) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Admin access required')));
-      return;
+    // Opens the shared dialog (handles roles for “Other” and does the POST)
+    final newId = await showCreateEventDialog(context);
+    if (!mounted || newId == null) return;
+
+    // Refresh the table
+    await _load();
+
+    // Notify users (same as before)
+    final idInt = int.tryParse(newId);
+    if (idInt != null) {
+      await _sendEventNotificationEmails(idInt);
     }
-
-    await _loadEventTypes();
-    await _loadClubs();
-    if (!mounted) return;
-
-    int? eventTypeId;
-    int? clubId = _userClubId;
-    DateTime? date;
-    final locationCtrl = TextEditingController();
-    final notesCtrl = TextEditingController();
-
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Create Event'),
-          content: SizedBox(
-            width: 400,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<int>(
-                  value: eventTypeId,
-                  decoration: const InputDecoration(labelText: 'Event Type'),
-                  items: _eventTypes
-                      .map((et) {
-                        final id = _toInt(et['id']);
-                        if (id == null) return null;
-                        return DropdownMenuItem<int>(
-                          value: id,
-                          child: Text(et['name']?.toString() ?? et['id'].toString()),
-                        );
-                      })
-                      .whereType<DropdownMenuItem<int>>()
-                      .toList(),
-                  onChanged: (v) => setDialogState(() => eventTypeId = v),
-                ),
-                const SizedBox(height: 8),
-                DropdownButtonFormField<int>(
-                  value: clubId,
-                  decoration: const InputDecoration(labelText: 'Club'),
-                  items: _clubs
-                      .map((c) {
-                        final id = _toInt(c['id']);
-                        if (id == null) return null;
-                        return DropdownMenuItem<int>(
-                          value: id,
-                          child: Text(c['name']?.toString() ?? c['id'].toString()),
-                        );
-                      })
-                      .whereType<DropdownMenuItem<int>>()
-                      .toList(),
-                  onChanged: (v) => setDialogState(() => clubId = v),
-                ),
-                const SizedBox(height: 8),
-                ListTile(
-                  title: Text(date == null ? 'Select Date' : date.toString().split(' ')[0]),
-                  trailing: const Icon(Icons.calendar_today),
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: context,
-                      initialDate: DateTime.now(),
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime(2030),
-                    );
-                    if (picked != null) setDialogState(() => date = picked);
-                  },
-                ),
-                TextField(
-                  controller: locationCtrl,
-                  decoration: const InputDecoration(labelText: 'Location'),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: notesCtrl,
-                  maxLines: 3,
-                  decoration: const InputDecoration(labelText: 'Notes (optional)'),  
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Create')),
-          ],
-        ),
-      ),
-    );
-
-    if (ok != true || eventTypeId == null || clubId == null || date == null) return;
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          duration: Duration(seconds: 30),
-          content: Row(
-            children: [
-              SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
-              SizedBox(width: 16),
-              Text('Creating event...'),
-            ],
-          ),
-        ),
-      );
-    }
-
-    final d = date!;
-    final eventDate = _fmtYmd(d);
-    
-    final post = await http.post(
-      Uri.parse('http://localhost:8080/events'),
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode({
-        'event_type_id': eventTypeId,
-        'lions_club_id': clubId,
-        'event_date': eventDate,
-        'location': locationCtrl.text,
-        'notes': notesCtrl.text,
-      }),
-    );
 
     if (!mounted) return;
-    ScaffoldMessenger.of(context).clearSnackBars();
-
-    if (post.statusCode == 201) {
-      final responseData = json.decode(post.body);
-      final newEventId = _toInt(responseData['id']) ?? int.tryParse(responseData['id']?.toString() ?? '0') ?? 0;
-
-      await _load();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Event created successfully')));
-      if (newEventId != 0) {
-        await _sendEventNotificationEmails(newEventId);
-      }
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: ${post.body}')));
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('✅ Event created successfully')),
+   );
   }
-
+// ...existing code...
   Future<void> _openEditEventDialog(Map<String, dynamic> event) async {
     if (!_isAdmin) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Admin access required')));

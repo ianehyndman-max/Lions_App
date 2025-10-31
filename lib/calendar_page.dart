@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:table_calendar/table_calendar.dart';
 import 'event_detail_page.dart';
+import 'create_event_dialog.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class CalendarPage extends StatefulWidget {
   const CalendarPage({super.key});
@@ -15,6 +17,7 @@ class _CalendarPageState extends State<CalendarPage> {
   bool _isLoading = true;
   String? _error;
   final Map<DateTime, List<Map<String, dynamic>>> _eventsByDay = {};
+  bool _isAdmin = false;
 
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
@@ -22,6 +25,7 @@ class _CalendarPageState extends State<CalendarPage> {
   @override
   void initState() {
     super.initState();
+    _loadAdminFlag();
     _fetchEvents();
   }
 
@@ -97,107 +101,27 @@ class _CalendarPageState extends State<CalendarPage> {
     return {'eventTypes': eventTypes, 'clubs': clubs};
   }
 
-  Future<void> _openCreateEventDialog([DateTime? initialDate]) async {
-    final lookups = await _loadLookups();
-    if (lookups == null) return;
+  Future<void> _loadAdminFlag() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() => _isAdmin = prefs.getBool('is_admin') ?? false);
+  }
 
-    final eventTypes = lookups['eventTypes'] as List<Map<String, dynamic>>;
-    final clubs = lookups['clubs'] as List<Map<String, dynamic>>;
+  Future<void> _openCreateEventDialogFromCalendar(DateTime day) async {
+    final newId = await showCreateEventDialog(context, initialDate: day);
+    if (!mounted || newId == null) return;
 
-    dynamic eventTypeId = eventTypes.isNotEmpty ? eventTypes.first['id'] : null;
-    dynamic clubId = clubs.isNotEmpty ? clubs.first['id'] : null;
-    DateTime? date = initialDate ?? _selectedDay ?? DateTime.now();
-    final locationCtrl = TextEditingController();
+    await _fetchEvents();
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDlg) => AlertDialog(
-          title: const Text('Create Event'),
-          content: SizedBox(
-            width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<dynamic>(
-                  value: eventTypeId,
-                  items: eventTypes
-                      .map((e) => DropdownMenuItem(value: e['id'], child: Text(e['name']?.toString() ?? '')))
-                      .toList(),
-                  onChanged: (v) => setDlg(() => eventTypeId = v),
-                  decoration: const InputDecoration(labelText: 'Event Type'),
-                ),
-                const SizedBox(height: 8),
-                DropdownButtonFormField<dynamic>(
-                  value: clubId,
-                  items: clubs
-                      .map((c) => DropdownMenuItem(value: c['id'], child: Text(c['name']?.toString() ?? '')))
-                      .toList(),
-                  onChanged: (v) => setDlg(() => clubId = v),
-                  decoration: const InputDecoration(labelText: 'Club'),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(child: Text(date == null ? 'No date' : _fmt(date!))),
-                    TextButton.icon(
-                      icon: const Icon(Icons.date_range),
-                      label: const Text('Pick date'),
-                      onPressed: () async {
-                        final picked = await showDatePicker(
-                          context: ctx,
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime(2100),
-                          initialDate: date ?? DateTime.now(),
-                        );
-                        if (picked != null) setDlg(() => date = picked);
-                      },
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: locationCtrl,
-                  decoration: const InputDecoration(labelText: 'Location'),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Create')),
-          ],
-        ),
-      ),
-    );
-
-    if (confirmed == true && eventTypeId != null && clubId != null && date != null) {
-      final res = await http.post(
-        Uri.parse('http://localhost:8080/events'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'event_type_id': eventTypeId,
-          'lions_club_id': clubId,
-          'event_date': _fmt(date!), // assert non-null
-          'location': locationCtrl.text,
-        }),
+    if (mounted) {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => EventDetailPage(eventId: newId)), // pass String
       );
-      if (res.statusCode == 200 || res.statusCode == 201) {
-        await _fetchEvents();
-        try {
-          final id = (json.decode(res.body) as Map<String, dynamic>)['id'];
-          final idStr = id?.toString();
-          if (idStr != null && mounted) {
-            // ignore: use_build_context_synchronously
-            Navigator.of(context).push(MaterialPageRoute(builder: (_) => EventDetailPage(eventId: idStr)));
-          }
-        } catch (_) {}
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: ${res.body}')));
-        }
-      }
     }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('✅ Event created successfully')),
+    );
   }
 
   @override
@@ -217,7 +141,7 @@ class _CalendarPageState extends State<CalendarPage> {
           IconButton(
             tooltip: 'Add Event',
             icon: const Icon(Icons.add),
-            onPressed: () => _openCreateEventDialog(_selectedDay ?? DateTime.now()),
+            onPressed: () => _openCreateEventDialogFromCalendar(_selectedDay ?? DateTime.now()), // <-- fix
           ),
         ],
       ),
@@ -295,12 +219,14 @@ calendarBuilders: CalendarBuilders(
                     ),
                   ],
                 ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _openCreateEventDialog(_selectedDay ?? DateTime.now()),
-        icon: const Icon(Icons.add),
-        label: const Text('Add Event'),
-        backgroundColor: Colors.red,
-      ),
-    );
+      floatingActionButton: _isAdmin
+          ? FloatingActionButton.extended(
+              onPressed: () => _openCreateEventDialogFromCalendar(_focusedDay),
+              icon: const Icon(Icons.add),
+              label: const Text('Create Event'),
+              backgroundColor: Colors.red,
+            )
+          : null,
+      );
   }
 }
