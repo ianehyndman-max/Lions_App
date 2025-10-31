@@ -113,23 +113,24 @@ class _EventsPageState extends State<EventsPage> {
 
   // ...existing code...
   Future<void> _openCreateEventDialog() async {
-    // Opens the shared dialog (handles roles for “Other” and does the POST)
-    final newId = await showCreateEventDialog(context);
-    if (!mounted || newId == null) return;
+    final result = await showCreateEventDialog(
+      context,
+      showSendEmailsToggle: true,   // allow choice
+      defaultSendEmails: true,      // default ON on Events page
+    );
+    if (!mounted || result == null) return;
 
-    // Refresh the table
     await _load();
 
-    // Notify users (same as before)
-    final idInt = int.tryParse(newId);
-    if (idInt != null) {
+    final idInt = int.tryParse(result.eventId);
+    if (idInt != null && result.sendEmails) {
       await _sendEventNotificationEmails(idInt);
     }
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('✅ Event created successfully')),
-   );
+    );
   }
 // ...existing code...
   Future<void> _openEditEventDialog(Map<String, dynamic> event) async {
