@@ -28,6 +28,12 @@ class _EventDetailPageState extends State<EventDetailPage> {
   final TextEditingController _notesController = TextEditingController();
   bool _isEditingNotes = false;
 
+  bool get _isOther {
+    final t = _event?['event_type']?.toString() ?? '';
+    final idStr = _event?['event_type_id']?.toString() ?? '';
+    return t == 'Other' || idStr == '4';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -350,8 +356,93 @@ class _EventDetailPageState extends State<EventDetailPage> {
     }
   }
 
+   // Add role (admins, Other only)
+  Future<void> _addRole() async {
+    if (!_isAdmin || !_isOther) return;
+
+    final nameCtrl = TextEditingController();
+    final timeInCtrl = TextEditingController();
+    final timeOutCtrl = TextEditingController();
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add Role'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Role name')),
+            TextField(controller: timeInCtrl, decoration: const InputDecoration(labelText: 'Time in (e.g. 08:00)')),
+            TextField(controller: timeOutCtrl, decoration: const InputDecoration(labelText: 'Time out (e.g. 12:00)')),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Add')),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+    final roleName = nameCtrl.text.trim();
+    if (roleName.isEmpty) return;
+
+    final res = await http.post(
+      Uri.parse('http://localhost:8080/events/${widget.eventId}/roles'),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({
+        'role_name': roleName,
+        'time_in': timeInCtrl.text.trim(),
+        'time_out': timeOutCtrl.text.trim(),
+      }),
+    );
+
+    if (!mounted) return;
+    if (res.statusCode == 201 || res.statusCode == 200) {
+      await _load();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Role added')));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: ${res.body}')));
+    }
+  }
+
+  // Delete role (admins, Other only)
+  Future<void> _deleteRole(int roleId) async {
+    if (!_isAdmin || !_isOther) return;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Role?'),
+        content: const Text('This will remove the role and any volunteer assignment for this event.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+
+    final res = await http.delete(
+      Uri.parse('http://localhost:8080/events/${widget.eventId}/roles/$roleId'),
+    );
+
+    if (!mounted) return;
+    if (res.statusCode == 200 || res.statusCode == 204) {
+      await _load();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Role deleted')));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: ${res.body}')));
+    }
+  }
+
   @override
-  Widget build(BuildContext context) {
+    Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
@@ -364,8 +455,23 @@ class _EventDetailPageState extends State<EventDetailPage> {
               tooltip: 'Print Event Details',
               onPressed: _printEvent,
             ),
+          /*if (_event != null && _isAdmin && _isOther)
+            IconButton(
+              icon: const Icon(Icons.add),
+              tooltip: 'Add Role',
+              onPressed: _addRole,
+            ),*/
         ],
       ),
+
+       floatingActionButton: (_isAdmin && _isOther)
+          ? FloatingActionButton.extended(
+              onPressed: _addRole,
+              icon: const Icon(Icons.add),
+              label: const Text('Add Role'),
+              backgroundColor: Colors.red,
+          )
+          : null,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -423,23 +529,39 @@ class _EventDetailPageState extends State<EventDetailPage> {
                                         fontWeight: isCurrentUser ? FontWeight.bold : FontWeight.normal,
                                       ))),
                                   DataCell(
-                                    _isAdmin
-                                        ? TextButton(
-                                            onPressed: () => _pickVolunteer(r),
-                                            child: Text(hasVolunteer ? 'Change' : 'Assign'),
-                                          )
-                                        : isCurrentUser
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        // Primary action (unchanged)
+                                        _isAdmin
                                             ? TextButton(
-                                                onPressed: _showChangeMyMindDialog,
-                                                style: TextButton.styleFrom(foregroundColor: Colors.orange),
-                                                child: const Text('Change My Mind'),
+                                                onPressed: () => _pickVolunteer(r),
+                                                child: Text(hasVolunteer ? 'Change' : 'Assign'),
                                               )
-                                            : hasVolunteer
-                                                ? const SizedBox.shrink()
-                                                : TextButton(
-                                                    onPressed: () => _volunteerSelf(r),
-                                                    child: const Text('Volunteer'),
-                                                  ),
+                                            : isCurrentUser
+                                                ? TextButton(
+                                                    onPressed: _showChangeMyMindDialog,
+                                                    style: TextButton.styleFrom(foregroundColor: Colors.orange),
+                                                    child: const Text('Change My Mind'),
+                                                  )
+                                                : hasVolunteer
+                                                    ? const SizedBox.shrink()
+                                                    : TextButton(
+                                                        onPressed: () => _volunteerSelf(r),
+                                                        child: const Text('Volunteer'),
+                                                      ),
+                                        // Delete (admins on “Other” only)
+                                        if (_isAdmin && _isOther)
+                                          IconButton(
+                                            tooltip: 'Delete role',
+                                            icon: const Icon(Icons.delete, color: Colors.red),
+                                            onPressed: () {
+                                              final roleId = int.tryParse(r['role_id']?.toString() ?? '');
+                                              if (roleId != null) _deleteRole(roleId);
+                                            },
+                                          ),
+                                      ],
+                                    ),
                                   ),
                                 ]);
                               }).toList(),
