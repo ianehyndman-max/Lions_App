@@ -106,15 +106,33 @@ class _CalendarPageState extends State<CalendarPage> {
     setState(() => _isAdmin = prefs.getBool('is_admin') ?? false);
   }
 
-  Future<void> _openCreateEventDialogFromCalendar(DateTime day) async {
-    final newId = await showCreateEventDialog(context, initialDate: day);
-    if (!mounted || newId == null) return;
+  Future<void> _sendEventEmailsFromCalendar(String eventId) async {
+    try {
+      await http.post(
+        Uri.parse('http://localhost:8080/events/$eventId/notify'),
+        headers: {'Content-Type': 'application/json'},
+      );
+    } catch (_) {}
+  }
+
+    Future<void> _openCreateEventDialogFromCalendar(DateTime day) async {
+    final result = await showCreateEventDialog(
+      context,
+      initialDate: day,
+      showSendEmailsToggle: true,  // user can choose
+      defaultSendEmails: false,    // default OFF on Calendar
+    );
+    if (!mounted || result == null) return;
 
     await _fetchEvents();
 
+    if (result.sendEmails) {
+      await _sendEventEmailsFromCalendar(result.eventId);
+    }
+
     if (mounted) {
       Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => EventDetailPage(eventId: newId)), // pass String
+        MaterialPageRoute(builder: (_) => EventDetailPage(eventId: result.eventId)),
       );
     }
 
