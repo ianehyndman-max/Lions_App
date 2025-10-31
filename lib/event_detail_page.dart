@@ -6,6 +6,7 @@ import 'package:printing/printing.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+
 class EventDetailPage extends StatefulWidget {
   final dynamic eventId;
   const EventDetailPage({super.key, required this.eventId});
@@ -33,6 +34,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
     final idStr = _event?['event_type_id']?.toString() ?? '';
     return t == 'Other' || idStr == '4';
   }
+
+  bool get _hasUnassigned =>
+      _roles.any((r) => (r['volunteer_name']?.toString().trim().isEmpty ?? true));
 
   @override
   void initState() {
@@ -81,6 +85,112 @@ class _EventDetailPageState extends State<EventDetailPage> {
         _error = 'Error: $e';
         _loading = false;
       });
+    }
+  }
+
+  Future<void> _sendResendToAll() async {
+  final proceed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Resend event details to all?'),
+      content: Text(_hasUnassigned
+          ? 'There are unassigned shifts. We will include a note asking for volunteers.'
+          : 'There are no unassigned shifts. Resend anyway?'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Send')),
+      ],
+    ),
+  );
+  if (proceed != true) return;
+
+  if (!mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(content: Text('Sending email to all...')),
+  );
+
+  try {
+    final res = await http.post(
+      Uri.parse('http://localhost:8080/events/${widget.eventId}/notify'),
+      headers: {'Content-Type': 'application/json'},
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    if (res.statusCode == 200) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Email sent to all members.')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed: ${res.body}')),
+      );
+    }
+  } catch (e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+  }
+}
+
+  Future<void> _sendAssignedReminder() async {
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Send reminder to assigned volunteers?'),
+        content: const Text('We’ll email only assigned volunteers with the event details.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Send')),
+        ],
+      ),
+    );
+    if (proceed != true) return;
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Sending reminder to assigned volunteers...')),
+    );
+
+    try {
+      // Try common API shapes in order:
+      final urls = <Uri>[
+        Uri.parse('http://localhost:8080/events/${widget.eventId}/notify_assigned'),      // 1) dedicated route
+        Uri.parse('http://localhost:8080/events/${widget.eventId}/notify?only_assigned=true'), // 2) query flag
+      ];
+
+      http.Response? res;
+      for (final u in urls) {
+        final r = await http.post(u, headers: {'Content-Type': 'application/json'});
+        // If this endpoint exists (not 404), use its result and stop trying others.
+        if (r.statusCode != 404) {
+          res = r;
+          break;
+        }
+      }
+
+      // 3) Fallback: same /notify with JSON body flag
+      res ??= await http.post(
+        Uri.parse('http://localhost:8080/events/${widget.eventId}/notify'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'only_assigned': true}),
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).clearSnackBars();
+
+      if (res.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Reminder sent to assigned volunteers.')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed (${res.statusCode}): ${res.body}')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
   }
 
@@ -455,22 +565,41 @@ class _EventDetailPageState extends State<EventDetailPage> {
               tooltip: 'Print Event Details',
               onPressed: _printEvent,
             ),
-          /*if (_event != null && _isAdmin && _isOther)
-            IconButton(
-              icon: const Icon(Icons.add),
-              tooltip: 'Add Role',
-              onPressed: _addRole,
-            ),*/
         ],
       ),
 
-       floatingActionButton: (_isAdmin && _isOther)
-          ? FloatingActionButton.extended(
-              onPressed: _addRole,
-              icon: const Icon(Icons.add),
-              label: const Text('Add Role'),
-              backgroundColor: Colors.red,
-          )
+             floatingActionButton: _isAdmin
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Email assigned volunteers
+                FloatingActionButton.extended(
+                  heroTag: 'fab-email-assigned',
+                  onPressed: _sendAssignedReminder,
+                  icon: const Icon(Icons.mark_email_unread_outlined),
+                  label: const Text('Email Assigned'),
+                  backgroundColor: Colors.blue,
+                ),
+                const SizedBox(height: 10),
+                // Resend to all (disabled visually if none unassigned? we allow but show note)
+                FloatingActionButton.extended(
+                  heroTag: 'fab-resend-all',
+                  onPressed: _sendResendToAll,
+                  icon: const Icon(Icons.outgoing_mail),
+                  label: Text(_hasUnassigned ? 'Resend (unfilled)' : 'Resend to All'),
+                  backgroundColor: _hasUnassigned ? Colors.orange : Colors.grey.shade700,
+                ),
+                const SizedBox(height: 10),
+                if (_isOther)
+                  FloatingActionButton.extended(
+                    heroTag: 'fab-add-role',
+                    onPressed: _addRole,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add Role'),
+                    backgroundColor: Colors.red,
+                  ),
+              ],
+            )
           : null,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
