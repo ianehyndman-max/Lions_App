@@ -47,6 +47,23 @@ Future<void> _sendEmail({
   }
 }
 
+// Template cache/renderer
+final Map<String, String> _templateCache = {};
+
+Future<String> _renderTemplate(String filename, Map<String, String> vars) async {
+  // reads from lions_api/templates/<filename>
+  final path = 'templates/$filename';
+  final cached = _templateCache[path];
+  final template = cached ?? await File(path).readAsString();
+  _templateCache[path] = template;
+
+  var out = template;
+  vars.forEach((k, v) {
+    out = out.replaceAll('{{$k}}', v);
+  });
+  return out;
+}
+
 // ---------------- Members ----------------
 
 Future<Response> _members(Request req) async {
@@ -347,13 +364,34 @@ Future<Response> _eventDetails(Request req, String eventId) async {
 }
 
 // ...existing code...
+// ...existing code...
 Future<Response> _notifyEventMembers(Request req, String eventId) async {
   stderr.writeln('📧 POST /events/$eventId/notify');
+
+  // Parse body and query params
+  Map<String, dynamic> bodyJson = {};
+  try {
+    final raw = await req.readAsString();
+    if (raw.isNotEmpty) bodyJson = jsonDecode(raw) as Map<String, dynamic>;
+  } catch (_) {}
+  final qp = req.url.queryParameters;
+
+  final onlyAssigned   = (bodyJson['only_assigned'] == true)   || (qp['only_assigned'] == 'true');
+  final resendUnfilled = (bodyJson['resend_unfilled'] == true) || (qp['resend_unfilled'] == 'true');
+  final dryRun         = (bodyJson['dry_run'] == true)         || (qp['dry_run'] == 'true');
+
+  // Optional overrides from app (subject always allowed; body_html only when user edits)
+  final overrideSubject  = (bodyJson['subject'] as String?)?.trim();
+  final overrideBodyHtml = (bodyJson['body_html'] as String?)?.trim();
+  final overrideBodyText = (bodyJson['body'] as String?)?.trim(); // legacy plain text (we'll convert to <br>)
+
+  String _textToHtml(String s) => s.replaceAll('\n', '<br>');
+
   MySQLConnection? conn;
   try {
     conn = await _connect();
 
-    // Get event details
+    // Event details
     final eventResult = await conn.execute('''
       SELECT 
         e.id,
@@ -368,32 +406,13 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
       LEFT JOIN lions_club lc ON e.lions_club_id = lc.id
       WHERE e.id = :eventId
     ''', {'eventId': eventId});
+    if (eventResult.rows.isEmpty) return Response.notFound('Event not found');
 
-    if (eventResult.rows.isEmpty) {
-      return Response.notFound('Event not found');
-    }
-
-    final event = eventResult.rows.first.assoc();
+    final event  = eventResult.rows.first.assoc();
     final clubId = event['lions_club_id'];
     final isOther = (event['event_type'] ?? '').toString() == 'Other';
 
-    // Get all members from this club with valid emails
-    final membersResult = await conn.execute('''
-      SELECT id, name, email
-      FROM members
-      WHERE lions_club_id = :clubId
-        AND email IS NOT NULL
-        AND email != ''
-    ''', {'clubId': clubId.toString()});
-
-    if (membersResult.rows.isEmpty) {
-      return Response.ok(
-        jsonEncode({'message': 'No members with email addresses found'}),
-        headers: {'Content-Type': 'application/json'},
-      );
-    }
-
-    // Roles for email: template roles for normal types, event-specific for "Other"
+    // Roles section for email body
     final rolesResult = await conn.execute(isOther
       ? '''
         SELECT r.role_name, r.time_in, r.time_out
@@ -406,80 +425,116 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
         FROM roles r
         JOIN events e ON e.id = :eventId
         WHERE r.event_type_id = e.event_type_id
-          AND r.event_id IS NULL     -- template roles only
+          AND r.event_id IS NULL
         ORDER BY r.time_in, r.role_name
       ''', {'eventId': eventId});
 
-    // If "Other" has no roles yet, block sending to avoid empty email content
-    if (isOther && rolesResult.rows.isEmpty) {
+    // If "Other" has no roles yet, block sending to avoid empty content
+    if (!dryRun && isOther && rolesResult.rows.isEmpty) {
       return Response(400, body: 'No roles defined for this event yet.');
     }
 
-    final rolesHtml = StringBuffer();
-    rolesHtml.write('<h3>Volunteer Roles:</h3><ul>');
+    final rolesHtml = StringBuffer()
+      ..write('<h3>Volunteer Roles:</h3><ul>');
     for (final row in rolesResult.rows) {
       final r = row.assoc();
       rolesHtml.write('<li>${r['role_name']}: ${r['time_in']} - ${r['time_out']}</li>');
     }
     rolesHtml.write('</ul>');
 
-    // Compose and send emails (unchanged body except rolesHtml)
-    final subject = '🦁 New Event: ${event['event_type']} - ${event['club_name']}';
-    final body = '''
-<!DOCTYPE html>
-<html>
-<head>
-  <style>
-    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-    .header { background-color: #d32f2f; color: white; padding: 20px; text-align: center; }
-    .content { padding: 20px; }
-    .details { background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 15px 0; }
-    .details p { margin: 8px 0; }
-    .label { font-weight: bold; color: #d32f2f; }
-    .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
-  </style>
-</head>
-<body>
-  <div class="header">
-    <h1>🦁 New Lions Club Event</h1>
-  </div>
-  <div class="content">
-    <p>Dear Member,</p>
-    <p>A new event has been scheduled for ${event['club_name']}. We need volunteers!</p>
-    
-    <div class="details">
-      <p><span class="label">Event:</span> ${event['event_type']}</p>
-      <p><span class="label">Date:</span> ${event['event_date']}</p>
-      <p><span class="label">Location:</span> ${event['location'] ?? 'TBA'}</p>
-      ${event['notes']?.toString().isNotEmpty ?? false ? '<p><span class="label">Notes:</span> ${event['notes']}</p>' : ''}
-    </div>
+    final notesHtml = ((event['notes']?.toString().isNotEmpty) ?? false)
+        ? '<p><b>Notes:</b> ${event['notes']}</p>'
+        : '';
 
-    ${rolesHtml.toString()}
+    // Choose templates: default = new-event; flags switch to resend/assigned
+    String subjectTpl, bodyTpl;
+    if (onlyAssigned) {
+      subjectTpl = 'assigned_reminder_subject.txt';
+      bodyTpl    = 'assigned_reminder_body.html';
+    } else if (resendUnfilled) {
+      subjectTpl = 'resend_unfilled_subject.txt';
+      bodyTpl    = 'resend_unfilled_body.html';
+    } else {
+      subjectTpl = 'new_event_subject.txt';
+      bodyTpl    = 'new_event_body.html';
+    }
 
-    <p><strong>Please log in to the Lions App to sign up for a volunteer role.</strong></p>
-    
-    <p>We appreciate your service!</p>
-  </div>
-  <div class="footer">
-    <p>This is an automated message from the Lions Club Event Management System</p>
-  </div>
-</body>
-</html>
-''';
+    final subject = overrideSubject ??
+        await _renderTemplate(subjectTpl, {
+          'event_type': (event['event_type'] ?? '').toString(),
+          'club_name':  (event['club_name']  ?? '').toString(),
+        });
 
+    // Render HTML body from template first, then apply any override
+    final templateHtml = await _renderTemplate(bodyTpl, {
+      'event_type': (event['event_type'] ?? '').toString(),
+      'club_name':  (event['club_name']  ?? '').toString(),
+      'event_date': (event['event_date'] ?? '').toString(),
+      'location':   (event['location']   ?? 'TBA').toString(),
+      'notes_html': notesHtml,
+      'roles_html': rolesHtml.toString(),
+    });
+
+    final bodyHtml = (overrideBodyHtml?.isNotEmpty ?? false)
+        ? overrideBodyHtml!
+        : ((overrideBodyText?.isNotEmpty ?? false) ? _textToHtml(overrideBodyText!) : templateHtml);
+
+    // Resolve recipients
+    late final IResultSet membersResult;
+    if (onlyAssigned) {
+      membersResult = await conn.execute('''
+        SELECT DISTINCT m.id, m.name, m.email
+        FROM members m
+        JOIN event_volunteers ev ON ev.member_id = m.id
+        WHERE ev.event_id = :eventId
+          AND m.email IS NOT NULL AND m.email <> ''
+      ''', {'eventId': eventId});
+    } else {
+      membersResult = await conn.execute('''
+        SELECT id, name, email
+        FROM members
+        WHERE lions_club_id = :clubId
+          AND email IS NOT NULL
+          AND email <> ''
+      ''', {'clubId': clubId.toString()});
+    }
+
+    // Build a simple list for preview count
+    final recipientEmails = <String>[];
+    for (final row in membersResult.rows) {
+      final email = (row.assoc()['email'] ?? '').toString();
+      if (email.isNotEmpty) recipientEmails.add(email);
+    }
+
+    // If preview requested, return subject/body_html and recipient count without sending
+    if (dryRun) {
+      return Response.ok(
+        jsonEncode({
+          'subject': subject,
+          'body_html': bodyHtml,
+          'recipients': recipientEmails.length,
+        }),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+
+    if (recipientEmails.isEmpty) {
+      return Response.ok(
+        jsonEncode({'message': 'No recipients with email addresses found'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+
+    // Send HTML emails
     int successCount = 0;
     int failCount = 0;
-    for (final row in membersResult.rows) {
-      final member = row.assoc();
-      final email = member['email']?.toString() ?? '';
-      if (email.isNotEmpty) {
-        try {
-          await _sendEmail(to: email, subject: subject, body: body);
-          successCount++;
-        } catch (e) {
-          stderr.writeln('❌ Failed to send to ${member['name']} ($email): $e');
-          failCount++;
-        }
+    for (final email in recipientEmails) {
+      try {
+        await _sendEmail(to: email, subject: subject, body: bodyHtml); // _sendEmail uses .html
+        successCount++;
+      } catch (e) {
+        stderr.writeln('❌ Failed to send to $email: $e');
+        failCount++;
       }
     }
 
@@ -488,7 +543,7 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
         'success': true,
         'sent': successCount,
         'failed': failCount,
-        'message': 'Emails sent to $successCount members${failCount > 0 ? ', $failCount failed' : ''}'
+        'message': 'Emails sent to $successCount members${failCount > 0 ? ', $failCount failed' : ''}',
       }),
       headers: {'Content-Type': 'application/json'},
     );
@@ -499,6 +554,7 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
     await conn?.close();
   }
 }
+
 
 
 Future<Response> _assignVolunteer(Request req, String eventId) async {
@@ -711,7 +767,7 @@ Future<Response> _updateEvent(Request req, String id) async {
 
     await conn.execute('''
       UPDATE events
-      SET event_type_id = :et, lions_club_id = :club, event_date = :date, location = :loc, notes = :notes
+      SET event_type_id = :et, lions_club_id = :club, event_date = :date, location = :loc, notes = :notes,
       WHERE id = :id
     ''', {'et': et.toString(), 'club': club.toString(), 'date': date.toString(), 'loc': loc, 'notes': notes, 'id': id});
 

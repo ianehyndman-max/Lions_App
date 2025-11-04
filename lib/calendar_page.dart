@@ -126,21 +126,23 @@ class _CalendarPageState extends State<CalendarPage> {
 
     await _fetchEvents();
 
-    if (result.sendEmails) {
-      await _sendEventEmailsFromCalendar(result.eventId);
-    }
-
-    if (mounted) {
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => EventDetailPage(eventId: result.eventId)),
-      );
-    }
-
-    if (!mounted) return;
+   if (result.sendEmails) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => EventDetailPage(
+          eventId: int.tryParse(result.eventId) ?? result.eventId,
+          autoOpenNewEventPreview: true, // <-- use NEW event preview
+        ),
+      ),
+    );
+  } else {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('✅ Event created successfully')),
+      const SnackBar(content: Text('✅ Event created')),
     );
   }
+}
+
+
 
   @override
   Widget build(BuildContext context) {

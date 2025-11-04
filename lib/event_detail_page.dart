@@ -5,11 +5,20 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:printing/printing.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-
+import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
+import 'widgets/email_html_editor.dart'; // selector: exports stub for Windows
 
 class EventDetailPage extends StatefulWidget {
   final dynamic eventId;
-  const EventDetailPage({super.key, required this.eventId});
+  final bool autoOpenSendAll;
+  final bool autoOpenNewEventPreview;
+
+  const EventDetailPage({
+    super.key,
+    required this.eventId,
+    this.autoOpenSendAll = false,
+    this.autoOpenNewEventPreview = false,
+  });
 
   @override
   State<EventDetailPage> createState() => _EventDetailPageState();
@@ -20,14 +29,15 @@ class _EventDetailPageState extends State<EventDetailPage> {
   List<dynamic> _roles = [];
   bool _loading = true;
   String? _error;
-  
+
   int? _userMemberId;
   bool _isAdmin = false;
   String? _clubEmail;
   String? _clubPhone;
-  
+
   final TextEditingController _notesController = TextEditingController();
   bool _isEditingNotes = false;
+  bool _openedAutoPreview = false;
 
   bool get _isOther {
     final t = _event?['event_type']?.toString() ?? '';
@@ -37,6 +47,10 @@ class _EventDetailPageState extends State<EventDetailPage> {
 
   bool get _hasUnassigned =>
       _roles.any((r) => (r['volunteer_name']?.toString().trim().isEmpty ?? true));
+
+  int get _assignedCount =>
+      _roles.where((r) => (r['volunteer_name']?.toString().trim().isNotEmpty ?? false)).length;
+  int get _unassignedCount => _roles.length - _assignedCount;
 
   @override
   void initState() {
@@ -48,6 +62,290 @@ class _EventDetailPageState extends State<EventDetailPage> {
   void dispose() {
     _notesController.dispose();
     super.dispose();
+  }
+
+  Future<Map<String, String>?> _showEmailPreview({required String mode}) async {
+    final flags = <String, dynamic>{'dry_run': true};
+    if (mode == 'assigned') flags['only_assigned'] = true;
+    if (mode == 'resend') flags['resend_unfilled'] = true;
+
+    http.Response res;
+    try {
+      res = await http.post(
+        Uri.parse('http://localhost:8080/events/${widget.eventId}/notify'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(flags),
+      );
+    } catch (e) {
+      if (!mounted) return null;
+      await showDialog(
+        context: context,
+        builder: (_) => AlertDialog(title: const Text('Preview failed'), content: Text('Network error: $e')),
+      );
+      return null;
+    }
+    if (res.statusCode != 200) {
+      if (!mounted) return null;
+      await showDialog(
+        context: context,
+        builder: (_) => AlertDialog(title: const Text('Preview failed'), content: Text(res.body)),
+      );
+      return null;
+    }
+
+    final data = json.decode(res.body) as Map<String, dynamic>;
+    final subjectCtrl = TextEditingController(text: (data['subject'] ?? '').toString());
+    String bodyHtml = (data['body_html'] ?? '').toString();
+    final recipients = data['recipients']?.toString() ?? '';
+
+    final eventNotes = _event?['notes']?.toString() ?? '';
+    final onlyAssigned = mode == 'assigned';
+
+    // Patch notes + roles (supports {{roles_html}} or UL-wrapped token or an existing UL/OL under the heading)
+    bodyHtml = _patchNotesAndRoles(
+      bodyHtml,
+      notes: eventNotes,
+      onlyAssigned: onlyAssigned,
+    );
+
+    final editorCtrl = EmailHtmlEditorController();
+    final editableHtml = _extractBodyHtml(bodyHtml);
+    String previewHtml = bodyHtml;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        bool showEditor = false;
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) => DefaultTabController(
+            length: 2,
+            child: AlertDialog(
+              title: Text(switch (mode) {
+                'assigned' => 'Preview: Email Assigned',
+                'new' => 'Preview: New Event Email',
+                _ => 'Preview: Resend to All',
+              }),
+              content: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: 900,
+                  maxHeight: MediaQuery.of(context).size.height * 0.8,
+                ),
+                child: SizedBox(
+                  width: 820,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.max,
+                    children: [
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text('Recipients: $recipients', style: const TextStyle(color: Colors.grey)),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(controller: subjectCtrl, decoration: const InputDecoration(labelText: 'Subject')),
+                      const SizedBox(height: 12),
+                      TabBar(
+                        tabs: const [Tab(text: 'Preview'), Tab(text: 'Edit')],
+                        onTap: (i) async {
+                          if (i == 1 && !showEditor) {
+                            Future.delayed(const Duration(milliseconds: 10), () {
+                              setDialogState(() => showEditor = true);
+                            });
+                          }
+                          if (i == 0) {
+                            final edited = (await editorCtrl.getHtml()).trim();
+                            final merged = _mergeIntoBody(bodyHtml, edited.isEmpty ? editableHtml : edited);
+                            setDialogState(() => previewHtml = merged);
+                          }
+                        },
+                      ),
+                      Expanded(
+                        child: TabBarView(
+                          physics: const NeverScrollableScrollPhysics(),
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.all(8),
+                              child: SingleChildScrollView(child: HtmlWidget(previewHtml)),
+                            ),
+                            Builder(
+                              builder: (_) {
+                                if (!showEditor) {
+                                  return const Center(child: CircularProgressIndicator());
+                                }
+                                return EmailHtmlEditor(
+                                  controller: editorCtrl,
+                                  initialHtml: editableHtml,
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Send')),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (ok == true) {
+      final editedHtml = (await editorCtrl.getHtml()).trim();
+      final mergedHtml = _mergeIntoBody(bodyHtml, editedHtml.isEmpty ? editableHtml : editedHtml);
+      return {
+        'subject': subjectCtrl.text.trim(),
+        'body_html': mergedHtml,
+      };
+    }
+    return null;
+  }
+
+  // Replace {{notes}} and roles section with our table/list including volunteer_name
+  String _patchNotesAndRoles(
+    String html, {
+    required String notes,
+    required bool onlyAssigned,
+  }) {
+    var out = html;
+
+    // notes
+    out = out.replaceAll(
+      RegExp(r'{{\s*notes\s*}}', caseSensitive: false),
+      _escapeHtml(notes),
+    );
+
+    final rolesTable = _buildRolesTableHtml(onlyAssigned: onlyAssigned);
+
+    // explicit token
+    out = out.replaceAll(
+      RegExp(r'{{\s*roles_html\s*}}', caseSensitive: false),
+      rolesTable,
+    );
+
+    // common wrapped form <ul><li>{{roles_html}}</li></ul>
+    out = out.replaceAll(
+      RegExp(r'<ul[^>]*>\s*<li[^>]*>\s*{{\s*roles_html\s*}}\s*</li>\s*</ul>',
+          caseSensitive: false, dotAll: true),
+      rolesTable,
+    );
+
+    // replace a UL/OL directly following "Volunteer Roles" heading
+    out = out.replaceAllMapped(
+      RegExp(
+        r'(<h[23][^>]*>\s*Volunteer Roles\s*:?<\/h[23]>\s*)(?:<ul[^>]*>[\s\S]*?<\/ul>|<ol[^>]*>[\s\S]*?<\/ol>)',
+        caseSensitive: false,
+      ),
+      (m) => '${m.group(1)}$rolesTable',
+    );
+
+    return out;
+  }
+
+  // Build a horizontally scrollable roles table
+  String _buildRolesTableHtml({required bool onlyAssigned}) {
+    final buffer = StringBuffer();
+    buffer.write('''
+<div style="max-width:100%; overflow-x:auto;">
+  <table style="border-collapse:collapse; min-width:650px; width:800px;">
+    <thead>
+      <tr>
+        <th style="text-align:left; padding:8px; border:1px solid #ddd; background:#f5f5f5;">Role</th>
+        <th style="text-align:left; padding:8px; border:1px solid #ddd; background:#f5f5f5;">Time In</th>
+        <th style="text-align:left; padding:8px; border:1px solid #ddd; background:#f5f5f5;">Time Out</th>
+        <th style="text-align:left; padding:8px; border:1px solid #ddd; background:#f5f5f5;">Volunteer</th>
+      </tr>
+    </thead>
+    <tbody>
+''');
+
+    for (final r in _roles) {
+      if (r is! Map) continue;
+      final role = _escapeHtml(r['role_name']?.toString() ?? '');
+      final timeIn = _escapeHtml(_fmtTime(r['time_in']?.toString()));
+      final timeOut = _escapeHtml(_fmtTime(r['time_out']?.toString()));
+      final rawName = (r['volunteer_name'] ?? r['name'])?.toString() ?? '';
+      final hasName = rawName.trim().isNotEmpty;
+
+      if (onlyAssigned && !hasName) continue;
+
+      final volunteerName = hasName ? _escapeHtml(rawName) : 'Unassigned';
+
+      buffer.write('''
+      <tr>
+        <td style="padding:8px; border:1px solid #ddd;">$role</td>
+        <td style="padding:8px; border:1px solid #ddd; white-space:nowrap;">$timeIn</td>
+        <td style="padding:8px; border:1px solid #ddd; white-space:nowrap;">$timeOut</td>
+        <td style="padding:8px; border:1px solid #ddd;">$volunteerName</td>
+      </tr>
+''');
+    }
+
+    buffer.write('''
+    </tbody>
+  </table>
+</div>
+''');
+    return buffer.toString();
+  }
+
+  String _fmtTime(String? t) {
+    if (t == null) return '';
+    final m = RegExp(r'^(\d{1,2}:\d{2})').firstMatch(t);
+    return m != null ? m.group(1)! : t;
+  }
+
+  // Extract just the <body> inner HTML for editing
+  String _extractBodyHtml(String html) {
+    final lower = html.toLowerCase();
+    final bodyOpen = lower.indexOf('<body');
+    if (bodyOpen >= 0) {
+      final openEnd = html.indexOf('>', bodyOpen);
+      if (openEnd >= 0) {
+        final bodyClose = lower.indexOf('</body>', openEnd + 1);
+        if (bodyClose > openEnd) {
+          final inner = html.substring(openEnd + 1, bodyClose);
+          return _sanitizeFragment(inner);
+        }
+      }
+    }
+    return _sanitizeFragment(html);
+  }
+
+  String _sanitizeFragment(String html) {
+    return html
+        .replaceAll(RegExp(r'<!DOCTYPE[^>]*>', caseSensitive: false), '')
+        .replaceAll(RegExp(r'</?(html|head|body)[^>]*>', caseSensitive: false), '')
+        .replaceAll(RegExp(r'<script[^>]*>[\s\S]*?</script>', caseSensitive: false), '')
+        .replaceAll(RegExp(r'<style[^>]*>[\s\S]*?</style>', caseSensitive: false), '')
+        .trim();
+  }
+
+  String _mergeIntoBody(String original, String fragment) {
+    final lower = original.toLowerCase();
+    final bodyOpen = lower.indexOf('<body');
+    if (bodyOpen >= 0) {
+      final openEnd = original.indexOf('>', bodyOpen);
+      if (openEnd >= 0) {
+        final bodyClose = lower.indexOf('</body>', openEnd + 1);
+        if (bodyClose > openEnd) {
+          return original.substring(0, openEnd + 1) + fragment + original.substring(bodyClose);
+        }
+      }
+    }
+    return fragment;
+  }
+
+  String _escapeHtml(String s) {
+    return s
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
   }
 
   Future<void> _loadUserProfile() async {
@@ -66,17 +364,24 @@ class _EventDetailPageState extends State<EventDetailPage> {
       final res = await http.get(Uri.parse('http://localhost:8080/events/${widget.eventId}'));
       if (res.statusCode == 200) {
         final data = json.decode(res.body) as Map<String, dynamic>;
-        setState(() {
-          _event = data['event'] as Map<String, dynamic>;
-          _roles = data['roles'] as List<dynamic>;
-          _notesController.text = _event!['notes']?.toString() ?? '';
-          _clubEmail = _event!['club_email']?.toString();
-          _clubPhone = _event!['club_phone']?.toString();
-          _loading = false;
-        });
+        _event = data['event'] as Map<String, dynamic>;
+        _roles = data['roles'] as List<dynamic>;
+        _notesController.text = _event!['notes']?.toString() ?? '';
+        _clubEmail = _event!['club_email']?.toString();
+        _clubPhone = _event!['club_phone']?.toString();
+        setState(() => _loading = false);
+
+        if (!_openedAutoPreview) {
+          _openedAutoPreview = true;
+          if (widget.autoOpenNewEventPreview) {
+            await _sendNewEventWithPreview();
+          } else if (widget.autoOpenSendAll) {
+            await _sendResendToAll();
+          }
+        }
       } else {
         setState(() {
-          _error = 'Failed to load: ${res.statusCode}';
+          _error = 'Failed: ${res.statusCode} ${res.body}';
           _loading = false;
         });
       }
@@ -89,104 +394,25 @@ class _EventDetailPageState extends State<EventDetailPage> {
   }
 
   Future<void> _sendResendToAll() async {
-  final proceed = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: const Text('Resend event details to all?'),
-      content: Text(_hasUnassigned
-          ? 'There are unassigned shifts. We will include a note asking for volunteers.'
-          : 'There are no unassigned shifts. Resend anyway?'),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Send')),
-      ],
-    ),
-  );
-  if (proceed != true) return;
-
-  if (!mounted) return;
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(content: Text('Sending email to all...')),
-  );
-
-  try {
-    final res = await http.post(
-      Uri.parse('http://localhost:8080/events/${widget.eventId}/notify'),
-      headers: {'Content-Type': 'application/json'},
-    );
+    final draft = await _showEmailPreview(mode: 'resend');
+    if (draft == null) return;
     if (!mounted) return;
-    ScaffoldMessenger.of(context).clearSnackBars();
-    if (res.statusCode == 200) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Email sent to all members.')),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed: ${res.body}')),
-      );
-    }
-  } catch (e) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-  }
-}
-
-  Future<void> _sendAssignedReminder() async {
-    final proceed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Send reminder to assigned volunteers?'),
-        content: const Text('We’ll email only assigned volunteers with the event details.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Send')),
-        ],
-      ),
-    );
-    if (proceed != true) return;
-
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Sending reminder to assigned volunteers...')),
-    );
-
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sending email to all...')));
     try {
-      // Try common API shapes in order:
-      final urls = <Uri>[
-        Uri.parse('http://localhost:8080/events/${widget.eventId}/notify_assigned'),      // 1) dedicated route
-        Uri.parse('http://localhost:8080/events/${widget.eventId}/notify?only_assigned=true'), // 2) query flag
-      ];
-
-      http.Response? res;
-      for (final u in urls) {
-        final r = await http.post(u, headers: {'Content-Type': 'application/json'});
-        // If this endpoint exists (not 404), use its result and stop trying others.
-        if (r.statusCode != 404) {
-          res = r;
-          break;
-        }
-      }
-
-      // 3) Fallback: same /notify with JSON body flag
-      res ??= await http.post(
+      final res = await http.post(
         Uri.parse('http://localhost:8080/events/${widget.eventId}/notify'),
         headers: {'Content-Type': 'application/json'},
-        body: json.encode({'only_assigned': true}),
+        body: json.encode({
+          'resend_unfilled': true,
+          'subject': draft['subject'],
+          'body_html': draft['body_html'],
+        }),
       );
-
       if (!mounted) return;
       ScaffoldMessenger.of(context).clearSnackBars();
-
-      if (res.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Reminder sent to assigned volunteers.')),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed (${res.statusCode}): ${res.body}')),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(res.statusCode == 200 ? 'Email sent to all members.' : 'Failed (${res.statusCode}): ${res.body}')),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).clearSnackBars();
@@ -194,11 +420,62 @@ class _EventDetailPageState extends State<EventDetailPage> {
     }
   }
 
-    Future<void> _printEvent() async {
+  Future<void> _sendAssignedReminder() async {
+    final draft = await _showEmailPreview(mode: 'assigned');
+    if (draft == null || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sending reminder to assigned volunteers...')));
+    try {
+      final res = await http.post(
+        Uri.parse('http://localhost:8080/events/${widget.eventId}/notify'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'only_assigned': true,
+          'subject': draft['subject'],
+          'body_html': draft['body_html'],
+        }),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(res.statusCode == 200 ? 'Reminder sent to assigned volunteers.' : 'Failed (${res.statusCode}): ${res.body}')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+  }
+
+  Future<void> _sendNewEventWithPreview() async {
+    final draft = await _showEmailPreview(mode: 'new');
+    if (draft == null) return;
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sending new event email...')));
+    try {
+      final res = await http.post(
+        Uri.parse('http://localhost:8080/events/${widget.eventId}/notify'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'subject': draft['subject'],
+          'body_html': draft['body_html'],
+        }),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(res.statusCode == 200 ? 'New event email sent.' : 'Failed (${res.statusCode}): ${res.body}')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+  }
+
+  Future<void> _printEvent() async {
     if (_event == null) return;
 
     final pdf = pw.Document();
-
     pdf.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.a4,
@@ -220,13 +497,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
                 headers: ['Role', 'Time In', 'Time Out', 'Volunteer', 'Signature'],
                 data: _roles.map((r) {
                   final volunteer = r['volunteer_name']?.toString() ?? 'Unassigned';
-                  return [
-                    r['role_name'] ?? '',
-                    r['time_in'] ?? '',
-                    r['time_out'] ?? '',
-                    volunteer,
-                    '', // Empty signature column
-                  ];
+                  return [r['role_name'] ?? '', r['time_in'] ?? '', r['time_out'] ?? '', volunteer, ''];
                 }).toList(),
                 headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
                 cellAlignment: pw.Alignment.centerLeft,
@@ -236,7 +507,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
                   1: const pw.FlexColumnWidth(1.5),
                   2: const pw.FlexColumnWidth(1.5),
                   3: const pw.FlexColumnWidth(2),
-                  4: const pw.FlexColumnWidth(2.5), // Wider for signature
+                  4: const pw.FlexColumnWidth(2.5),
                 },
               ),
               pw.SizedBox(height: 20),
@@ -262,13 +533,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
     if (_event == null) return;
     setState(() => _loading = true);
     try {
-      final eventTypeId = _event!['event_type_id'] is int 
-          ? _event!['event_type_id'] 
-          : int.parse(_event!['event_type_id'].toString());
-      
-      final clubId = _event!['club_id'] is int 
-          ? _event!['club_id'] 
-          : int.parse(_event!['club_id'].toString());
+      final eventTypeId =
+          _event!['event_type_id'] is int ? _event!['event_type_id'] : int.parse(_event!['event_type_id'].toString());
+      final clubId = _event!['club_id'] is int ? _event!['club_id'] : int.parse(_event!['club_id'].toString());
 
       final res = await http.put(
         Uri.parse('http://localhost:8080/events/${widget.eventId}'),
@@ -296,7 +563,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
       }
     } catch (e) {
       setState(() => _loading = false);
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
     }
   }
 
@@ -345,51 +614,22 @@ class _EventDetailPageState extends State<EventDetailPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'We understand that circumstances change!',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
+            const Text('We understand that circumstances change!', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
-            const Text(
-              'To withdraw from your volunteer commitment, please contact the club secretary:',
-            ),
+            const Text('To withdraw from your volunteer commitment, please contact the club secretary:'),
             const SizedBox(height: 16),
             if (_clubPhone != null && _clubPhone!.isNotEmpty) ...[
-              Row(
-                children: [
-                  const Icon(Icons.phone, size: 20),
-                  const SizedBox(width: 8),
-                  Text(_clubPhone!, style: const TextStyle(fontWeight: FontWeight.bold)),
-                ],
-              ),
+              Row(children: [const Icon(Icons.phone, size: 20), const SizedBox(width: 8), Text(_clubPhone!, style: const TextStyle(fontWeight: FontWeight.bold))]),
               const SizedBox(height: 8),
             ],
             if (_clubEmail != null && _clubEmail!.isNotEmpty) ...[
-              Row(
-                children: [
-                  const Icon(Icons.email, size: 20),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(_clubEmail!, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  ),
-                ],
-              ),
+              Row(children: [const Icon(Icons.email, size: 20), const SizedBox(width: 8), Flexible(child: Text(_clubEmail!, style: const TextStyle(fontWeight: FontWeight.bold)))]),
             ],
-            if ((_clubPhone == null || _clubPhone!.isEmpty) && 
-                (_clubEmail == null || _clubEmail!.isEmpty)) ...[
-              const Text(
-                'Please contact your club secretary.',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-            ],
+            if ((_clubPhone == null || _clubPhone!.isEmpty) && (_clubEmail == null || _clubEmail!.isEmpty))
+              const Text('Please contact your club secretary.', style: TextStyle(fontWeight: FontWeight.bold)),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('OK'),
-          ),
-        ],
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
       ),
     );
   }
@@ -403,7 +643,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
     final clubId = _event!['club_id'];
     final res = await http.get(Uri.parse('http://localhost:8080/members?club_id=$clubId'));
     if (res.statusCode != 200) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to load members')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to load members')));
+      }
       return;
     }
     final members = (json.decode(res.body) as List).cast<Map<String, dynamic>>();
@@ -431,13 +673,15 @@ class _EventDetailPageState extends State<EventDetailPage> {
                         title: const Text('Clear assignment'),
                         onChanged: (v) => setDialogState(() => selectedMemberId = v),
                       ),
-                      ...members.map((m) => RadioListTile<dynamic>(
-                            value: m['id'],
-                            groupValue: selectedMemberId,
-                            title: Text(m['name'] ?? ''),
-                            subtitle: Text(m['email'] ?? ''),
-                            onChanged: (v) => setDialogState(() => selectedMemberId = v),
-                          )),
+                      ...members.map(
+                        (m) => RadioListTile<dynamic>(
+                          value: m['id'],
+                          groupValue: selectedMemberId,
+                          title: Text(m['name'] ?? ''),
+                          subtitle: Text(m['email'] ?? ''),
+                          onChanged: (v) => setDialogState(() => selectedMemberId = v),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -466,7 +710,6 @@ class _EventDetailPageState extends State<EventDetailPage> {
     }
   }
 
-   // Add role (admins, Other only)
   Future<void> _addRole() async {
     if (!_isAdmin || !_isOther) return;
 
@@ -516,7 +759,6 @@ class _EventDetailPageState extends State<EventDetailPage> {
     }
   }
 
-  // Delete role (admins, Other only)
   Future<void> _deleteRole(int roleId) async {
     if (!_isAdmin || !_isOther) return;
 
@@ -527,21 +769,14 @@ class _EventDetailPageState extends State<EventDetailPage> {
         content: const Text('This will remove the role and any volunteer assignment for this event.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
+          FilledButton(style: FilledButton.styleFrom(backgroundColor: Colors.red), onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
         ],
       ),
     );
 
     if (ok != true) return;
 
-    final res = await http.delete(
-      Uri.parse('http://localhost:8080/events/${widget.eventId}/roles/$roleId'),
-    );
-
+    final res = await http.delete(Uri.parse('http://localhost:8080/events/${widget.eventId}/roles/$roleId'));
     if (!mounted) return;
     if (res.statusCode == 200 || res.statusCode == 204) {
       await _load();
@@ -552,7 +787,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
   }
 
   @override
-    Widget build(BuildContext context) {
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
@@ -567,12 +802,10 @@ class _EventDetailPageState extends State<EventDetailPage> {
             ),
         ],
       ),
-
-             floatingActionButton: _isAdmin
+      floatingActionButton: _isAdmin
           ? Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Email assigned volunteers
                 FloatingActionButton.extended(
                   heroTag: 'fab-email-assigned',
                   onPressed: _sendAssignedReminder,
@@ -581,7 +814,6 @@ class _EventDetailPageState extends State<EventDetailPage> {
                   backgroundColor: Colors.blue,
                 ),
                 const SizedBox(height: 10),
-                // Resend to all (disabled visually if none unassigned? we allow but show note)
                 FloatingActionButton.extended(
                   heroTag: 'fab-resend-all',
                   onPressed: _sendResendToAll,
@@ -648,51 +880,53 @@ class _EventDetailPageState extends State<EventDetailPage> {
                                 final isCurrentUser = _userMemberId != null &&
                                     currentMemberId != null &&
                                     currentMemberId.toString() == _userMemberId.toString();
-                                return DataRow(cells: [
-                                  DataCell(Text(r['role_name'] ?? '')),
-                                  DataCell(Text(r['time_in'] ?? '')),
-                                  DataCell(Text(r['time_out'] ?? '')),
-                                  DataCell(Text(hasVolunteer ? volunteer : 'Unassigned',
+                                return DataRow(
+                                  cells: [
+                                    DataCell(Text(r['role_name'] ?? '')),
+                                    DataCell(Text(r['time_in'] ?? '')),
+                                    DataCell(Text(r['time_out'] ?? '')),
+                                    DataCell(Text(
+                                      hasVolunteer ? volunteer : 'Unassigned',
                                       style: TextStyle(
                                         color: hasVolunteer ? Colors.black : Colors.grey,
                                         fontWeight: isCurrentUser ? FontWeight.bold : FontWeight.normal,
-                                      ))),
-                                  DataCell(
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        // Primary action (unchanged)
-                                        _isAdmin
-                                            ? TextButton(
-                                                onPressed: () => _pickVolunteer(r),
-                                                child: Text(hasVolunteer ? 'Change' : 'Assign'),
-                                              )
-                                            : isCurrentUser
-                                                ? TextButton(
-                                                    onPressed: _showChangeMyMindDialog,
-                                                    style: TextButton.styleFrom(foregroundColor: Colors.orange),
-                                                    child: const Text('Change My Mind'),
-                                                  )
-                                                : hasVolunteer
-                                                    ? const SizedBox.shrink()
-                                                    : TextButton(
-                                                        onPressed: () => _volunteerSelf(r),
-                                                        child: const Text('Volunteer'),
-                                                      ),
-                                        // Delete (admins on “Other” only)
-                                        if (_isAdmin && _isOther)
-                                          IconButton(
-                                            tooltip: 'Delete role',
-                                            icon: const Icon(Icons.delete, color: Colors.red),
-                                            onPressed: () {
-                                              final roleId = int.tryParse(r['role_id']?.toString() ?? '');
-                                              if (roleId != null) _deleteRole(roleId);
-                                            },
-                                          ),
-                                      ],
+                                      ),
+                                    )),
+                                    DataCell(
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          _isAdmin
+                                              ? TextButton(
+                                                  onPressed: () => _pickVolunteer(r),
+                                                  child: Text(hasVolunteer ? 'Change' : 'Assign'),
+                                                )
+                                              : isCurrentUser
+                                                  ? TextButton(
+                                                      onPressed: _showChangeMyMindDialog,
+                                                      style: TextButton.styleFrom(foregroundColor: Colors.orange),
+                                                      child: const Text('Change My Mind'),
+                                                    )
+                                                  : hasVolunteer
+                                                      ? const SizedBox.shrink()
+                                                      : TextButton(
+                                                          onPressed: () => _volunteerSelf(r),
+                                                          child: const Text('Volunteer'),
+                                                        ),
+                                          if (_isAdmin && _isOther)
+                                            IconButton(
+                                              tooltip: 'Delete role',
+                                              icon: const Icon(Icons.delete, color: Colors.red),
+                                              onPressed: () {
+                                                final roleId = int.tryParse(r['role_id']?.toString() ?? '');
+                                                if (roleId != null) _deleteRole(roleId);
+                                              },
+                                            ),
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                ]);
+                                  ],
+                                );
                               }).toList(),
                             ),
                           ),
@@ -749,9 +983,13 @@ class _EventDetailPageState extends State<EventDetailPage> {
                                           ),
                                         )
                                       : Text(
-                                          _event!['notes']?.toString().isEmpty ?? true ? 'No notes yet' : _event!['notes'].toString(),
+                                          _event!['notes']?.toString().isEmpty ?? true
+                                              ? 'No notes yet'
+                                              : _event!['notes'].toString(),
                                           style: TextStyle(
-                                            color: _event!['notes']?.toString().isEmpty ?? true ? Colors.grey : Colors.black,
+                                            color: _event!['notes']?.toString().isEmpty ?? true
+                                                ? Colors.grey
+                                                : Colors.black,
                                           ),
                                         ),
                                 ],

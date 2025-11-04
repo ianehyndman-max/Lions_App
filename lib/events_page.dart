@@ -120,18 +120,26 @@ class _EventsPageState extends State<EventsPage> {
     );
     if (!mounted || result == null) return;
 
+    // Refresh list once after creation
     await _load();
 
-    final idInt = int.tryParse(result.eventId);
-    if (idInt != null && result.sendEmails) {
-      await _sendEventNotificationEmails(idInt);
-    }
-
-    if (!mounted) return;
+   final idInt = int.tryParse(result.eventId);
+  if (idInt != null && result.sendEmails) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => EventDetailPage(
+          eventId: idInt,
+          autoOpenNewEventPreview: true, // <-- use NEW event preview
+        ),
+      ),
+    );
+  } else {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('✅ Event created successfully')),
+      const SnackBar(content: Text('✅ Event created')),
     );
   }
+}
+    
 // ...existing code...
   Future<void> _openEditEventDialog(Map<String, dynamic> event) async {
     if (!_isAdmin) {

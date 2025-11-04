@@ -31,19 +31,16 @@ dependencies:
   flutter:
     sdk: flutter
   http: ^1.5.0
-  material_color_utilities: ^0.11.1
-  meta: ^1.16.0
-  characters: ^1.4.0
-  web: ^0.5.1
   table_calendar: ^3.0.9
   shared_preferences: ^2.2.2
   printing: ^5.11.0
   pdf: ^3.10.0
   mailer: ^6.0.1
-
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+  flutter_widget_from_html: ^0.16.1
+  quill_html_editor: ^2.2.8
+
+
 
 dev_dependencies:
   flutter_test:
@@ -65,9 +62,8 @@ dev_dependencies:
 # The following section is specific to Flutter packages.
 flutter:
   uses-material-design: true
-
   assets:
-    - assets/images/mudgeeraba_lions_image.jpg
+    - assets/images/fun_lion.jpg
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
