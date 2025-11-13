@@ -39,8 +39,11 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter_widget_from_html: ^0.16.1
   quill_html_editor: ^2.2.8
+  
 
-
+dependency_overrides:
+  file_picker:
+    path: third_party/file_picker
 
 dev_dependencies:
   flutter_test:
