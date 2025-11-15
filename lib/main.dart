@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'events_page.dart' as events;
 import 'members_page.dart' as members;
@@ -6,11 +7,25 @@ import 'news_page.dart' as news;
 import 'onboarding_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  final prefs = await SharedPreferences.getInstance();
-  final hasProfile = prefs.containsKey('member_id');
-  runApp(LionsApp(showOnboarding: !hasProfile));
+
+  // Print synchronous Flutter framework errors to console
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.dumpErrorToConsole(details);
+    print('FLUTTER ERROR: ${details.exceptionAsString()}');
+    if (details.stack != null) print(details.stack);
+  };
+
+  // Catch uncaught async errors and run app after async init
+  runZonedGuarded(() async {
+    final prefs = await SharedPreferences.getInstance();
+    final hasProfile = prefs.containsKey('member_id');
+    runApp(LionsApp(showOnboarding: !hasProfile));
+  }, (error, stack) {
+    print('ASYNC ERROR: $error');
+    print(stack);
+  });
 }
 
 class LionsApp extends StatelessWidget {
@@ -19,7 +34,7 @@ class LionsApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+      return MaterialApp(
       title: 'Lions Club',
       theme: ThemeData(primarySwatch: Colors.red),
       home: showOnboarding ? const OnboardingPage() : const MainScreen(),
@@ -33,7 +48,7 @@ class HomePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+      return Container(
       decoration: const BoxDecoration(
         image: DecorationImage(
           image: AssetImage('assets/images/fun_lion.jpg'),
@@ -128,12 +143,15 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
+        // debug: show navigation state on each rebuild
+     print('DEBUG: MainScreen build selectedIndex=$_selectedIndex');
     return Scaffold(
       body: Row(
         children: [
           NavigationRail(
             selectedIndex: _selectedIndex,
             onDestinationSelected: (index) {
+              print('DEBUG: NavigationRail onDestinationSelected -> $index');
               setState(() => _selectedIndex = index);
             },
             labelType: NavigationRailLabelType.all,
@@ -147,7 +165,10 @@ class _MainScreenState extends State<MainScreen> {
           ),
           const VerticalDivider(thickness: 1, width: 1),
           Expanded(
-            child: _pages[_selectedIndex],
+           child: Builder(builder: (ctx) {
+              debugPrint('DEBUG: showing page index=$_selectedIndex');
+              return _pages[_selectedIndex];
+            }),
           ),
         ],
       ),

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'config.dart';
 
 class CreateEventResult {
   final String eventId;
@@ -15,8 +16,10 @@ Future<CreateEventResult?> showCreateEventDialog(
   bool defaultSendEmails = false,    // Events page: true, Calendar: false
 }) async {
   try {
-    final etRes = await http.get(Uri.parse('http://localhost:8080/event_types'));
-    final clRes = await http.get(Uri.parse('http://localhost:8080/clubs'));
+    debugPrint('DEBUG: CreateEventDialog loading lookups from $apiBase');
+    final etRes = await http.get(Uri.parse('$apiBase/event_types'));
+    final clRes = await http.get(Uri.parse('$apiBase/clubs'));
+    debugPrint('DEBUG: CreateEventDialog lookup status: event_types=${etRes.statusCode}, clubs=${clRes.statusCode}');
     if (etRes.statusCode != 200 || clRes.statusCode != 200) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -195,11 +198,13 @@ Future<CreateEventResult?> showCreateEventDialog(
                         .toList();
                   }
 
+                  debugPrint('DEBUG: CreateEventDialog creating event (body keys=${body.keys.length})');
                   final res = await http.post(
-                    Uri.parse('http://localhost:8080/events'),
+                    Uri.parse('$apiBase/events'),
                     headers: {'Content-Type': 'application/json'},
                     body: json.encode(body),
                   );
+                  debugPrint('DEBUG: CreateEventDialog create status=${res.statusCode} body=${res.body}');
 
                   if (res.statusCode == 201 || res.statusCode == 200) {
                     try {

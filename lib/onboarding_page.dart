@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'main.dart';
+import 'config.dart';
+import 'dart:math';
 
 class OnboardingPage extends StatefulWidget {
   const OnboardingPage({super.key});
@@ -26,14 +28,30 @@ class _OnboardingPageState extends State<OnboardingPage> {
 
   Future<void> _loadClubs() async {
     try {
-      final res = await http.get(Uri.parse('http://localhost:8080/clubs'));
+      debugPrint('DEBUG: onboarding _fetchClubs -> $apiBase/clubs');
+      final res = await http.get(Uri.parse('$apiBase/clubs'));
+      debugPrint('DEBUG: onboarding /clubs status=${res.statusCode} content-type=${res.headers['content-type']}');
+      // guard: if server returned HTML (index.html) show informative error
+      final body = res.body;
+      if (!(res.headers['content-type']?.contains('application/json') ?? false) || body.trimLeft().startsWith('<')) {
+        final start = body.trimLeft();
+        final end = start.length < 200 ? start.length : 200;
+        debugPrint('ERROR: /clubs returned non-JSON (likely wrong host/origin). Response start: ${start.substring(0, end)}');
+        setState(() => _isLoading = false);
+        return;
+      }
       if (res.statusCode == 200) {
         setState(() {
-          _clubs = json.decode(res.body) as List;
+          _clubs = json.decode(body) as List<dynamic>;
           _isLoading = false;
         });
+        debugPrint('DEBUG: _loadClubs completed, clubs.length=${_clubs.length}');
+      } else {
+        debugPrint('DEBUG: _loadClubs non-200 ${res.statusCode} body=${res.body}');
+        setState(() => _isLoading = false);
       }
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('ERROR: onboarding _loadClubs exception: $e\n$st');
       setState(() => _isLoading = false);
     }
   }
@@ -41,7 +59,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
   Future<void> _loadMembers(int clubId) async {
     setState(() => _isLoading = true);
     try {
-      final res = await http.get(Uri.parse('http://localhost:8080/members?club_id=$clubId'));
+      final res = await http.get(Uri.parse('$apiBase/members?club_id=$clubId'));
       if (res.statusCode == 200) {
         setState(() {
           _members = json.decode(res.body) as List;
@@ -79,6 +97,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
 
   @override
   Widget build(BuildContext context) {
+    print('BUILD: isLoading=$_isLoading clubs=${_clubs.length} selectedClub=$_selectedClubId selectedMember=$_selectedMemberId');
     return Scaffold(
       appBar: AppBar(
         title: const Text('Welcome to Lions Club'),
@@ -93,19 +112,28 @@ class _OnboardingPageState extends State<OnboardingPage> {
                 children: [
                   const Text('Select your club:', style: TextStyle(fontSize: 18)),
                   const SizedBox(height: 16),
-                  DropdownButton<int>(
-                    isExpanded: true,
-                    hint: const Text('Choose Club'),
-                    value: _selectedClubId,
-                    items: _clubs.map((c) {
-                      final id = (c['id'] is num) ? (c['id'] as num).toInt() : int.parse(c['id'].toString());
-                      return DropdownMenuItem<int>(value: id, child: Text(c['name'].toString()));
-                    }).toList(),
-                    onChanged: (v) {
-                      setState(() => _selectedClubId = v);
-                      if (v != null) _loadMembers(v);
-                    },
-                  ),
+                  // Debug: show count so we know items were loaded
+                 Text('Clubs count: ${_clubs.length}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                 const SizedBox(height: 8),
+                 // Wrap with Listener to detect pointer events without consuming them
+                 Listener(
+                   onPointerDown: (_) => print('DEBUG: club dropdown pointer down'),
+                   onPointerUp: (_) => print('DEBUG: club dropdown pointer up'),
+                   child: DropdownButton<int>(
+                     isExpanded: true,
+                     hint: const Text('Choose Club'),
+                     value: _selectedClubId,
+                     items: _clubs.map((c) {
+                       final id = (c['id'] is num) ? (c['id'] as num).toInt() : int.parse(c['id'].toString());
+                       return DropdownMenuItem<int>(value: id, child: Text(c['name'].toString()));
+                     }).toList(),
+                     onChanged: (v) {
+                       print('DEBUG: club dropdown onChanged -> $v');
+                       setState(() => _selectedClubId = v);
+                       if (v != null) _loadMembers(v);
+                     },
+                   ),
+                 ),
                   const SizedBox(height: 32),
                   if (_members.isNotEmpty) ...[
                     const Text('Who are you?', style: TextStyle(fontSize: 18)),

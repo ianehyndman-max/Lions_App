@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'event_detail_page.dart';
 import 'create_event_dialog.dart';
+import 'config.dart';
 
 class EventsPage extends StatefulWidget {
   EventsPage({super.key});
@@ -36,6 +37,7 @@ class _EventsPageState extends State<EventsPage> {
   @override
   void initState() {
     super.initState();
+    debugPrint('DEBUG: EventsPage initState');
     _loadUserProfile();
   }
 
@@ -52,11 +54,13 @@ class _EventsPageState extends State<EventsPage> {
       _error = null;
     });
 
+    debugPrint('DEBUG: EventsPage _load start (clubId=$_userClubId)');
     try {
       final url = _userClubId == null
-          ? 'http://localhost:8080/events'
-          : 'http://localhost:8080/events?club_id=$_userClubId';
+          ? '$apiBase/events'
+          : '$apiBase/events?club_id=$_userClubId';
       final res = await http.get(Uri.parse(url));
+      debugPrint('DEBUG: EventsPage _load status=${res.statusCode}');
       if (res.statusCode == 200) {
         _events = (json.decode(res.body) as List);
       } else {
@@ -64,6 +68,7 @@ class _EventsPageState extends State<EventsPage> {
       }
     } catch (e) {
       _error = 'Error: $e';
+      debugPrint('ERROR: EventsPage _load -> $e');
     } finally {
       if (mounted) {
         setState(() => _loading = false);
@@ -72,24 +77,30 @@ class _EventsPageState extends State<EventsPage> {
   }
 
   Future<void> _loadEventTypes() async {
-    //final res = await http.get(Uri.parse('http://localhost:8080/event-types'));
-    final res = await http.get(Uri.parse('http://localhost:8080/event_types'));
+    debugPrint('DEBUG: EventsPage _loadEventTypes');
+    final res = await http.get(Uri.parse('$apiBase/event_types'));
     if (res.statusCode == 200) {
       setState(() => _eventTypes = json.decode(res.body) as List);
+    } else {
+      debugPrint('ERROR: EventsPage _loadEventTypes status=${res.statusCode}');
     }
   }
 
   Future<void> _loadClubs() async {
-    final res = await http.get(Uri.parse('http://localhost:8080/clubs'));
+    debugPrint('DEBUG: EventsPage _loadClubs');
+    final res = await http.get(Uri.parse('$apiBase/clubs'));
     if (res.statusCode == 200) {
       setState(() => _clubs = json.decode(res.body) as List);
+    } else {
+      debugPrint('ERROR: EventsPage _loadClubs status=${res.statusCode}');
     }
   }
 
   Future<void> _sendEventNotificationEmails(int eventId) async {
     try {
+      debugPrint('DEBUG: EventsPage notify eventId=$eventId');
       final res = await http.post(
-        Uri.parse('http://localhost:8080/events/$eventId/notify'),
+        Uri.parse('$apiBase/events/$eventId/notify'),
         headers: {'Content-Type': 'application/json'},
       );
       if (!mounted) return;
@@ -113,32 +124,61 @@ class _EventsPageState extends State<EventsPage> {
 
   // ...existing code...
   Future<void> _openCreateEventDialog() async {
+    await _loadEventTypes();
+    await _loadClubs();
     final result = await showCreateEventDialog(
       context,
-      showSendEmailsToggle: true,   // allow choice
-      defaultSendEmails: true,      // default ON on Events page
+      showSendEmailsToggle: true,
+      defaultSendEmails: true,
     );
-    if (!mounted || result == null) return;
 
-    // Refresh list once after creation
-    await _load();
+    // result expected to be Map<String, dynamic> or null
+    if (result == null) return;
 
-   final idInt = int.tryParse(result.eventId);
-  if (idInt != null && result.sendEmails) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => EventDetailPage(
-          eventId: idInt,
-          autoOpenNewEventPreview: true, // <-- use NEW event preview
-        ),
-      ),
-    );
-  } else {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('✅ Event created')),
-    );
+    // If the dialog returned the created event id (or the create code did)
+    String? createdEventId;
+    bool sendEmails = false;
+    final dyn = result as dynamic;
+
+    try {
+      if (dyn is Map) {
+        // dyn is dynamic so [] access is allowed at runtime
+        createdEventId = (dyn['event_id'] as String?) ?? dyn['id']?.toString();
+        sendEmails = (dyn['send_emails'] == true) || (dyn['sendEmails'] == true) || (dyn['send'] == true);
+      } else {
+        final ev = dyn.event_id ?? dyn.eventId ?? dyn.id;
+        if (ev != null) createdEventId = ev.toString();
+        final se = dyn.send_emails ?? dyn.sendEmails ?? dyn.send;
+        sendEmails = se == true;
+      }
+    } catch (_) {
+      // best-effort fallback for unexpected shapes
+      try {
+        final ev2 = (dyn is Map) ? dyn['event_id'] ?? dyn['id'] : null;
+        if (ev2 != null) createdEventId = ev2.toString();
+      } catch (_) {}
+    }
+
+    // If we have an id and sendEmails requested, trigger client-side send
+    if (createdEventId != null && sendEmails) {
+      try {
+        debugPrint('DEBUG: EventsPage -> sending notification for event $createdEventId');
+        await _sendEventNotificationEmails(int.parse(createdEventId));
+      } catch (e, st) {
+        debugPrint('ERROR: sending notification failed: $e\n$st');
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to send notification: $e')));
+        }
+      }
+    }
+
+    // navigate to event detail page (if you do)
+    if (createdEventId != null && context.mounted) {
+      final id = int.parse(createdEventId); // createdEventId is known non-null here
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => EventDetailPage(eventId: id)));
+    }
   }
-}
+
     
 // ...existing code...
   Future<void> _openEditEventDialog(Map<String, dynamic> event) async {
@@ -243,7 +283,7 @@ class _EventsPageState extends State<EventsPage> {
     final eventDate = _fmtYmd(d);
     
     final put = await http.put(
-      Uri.parse('http://localhost:8080/events/${event['id']}'),
+      Uri.parse('$apiBase/events/${event['id']}'),
       headers: {'Content-Type': 'application/json'},
       body: json.encode({
         'event_type_id': eventTypeId,
@@ -283,7 +323,8 @@ class _EventsPageState extends State<EventsPage> {
 
     if (ok != true) return;
 
-    final res = await http.delete(Uri.parse('http://localhost:8080/events/$eventId'));
+    debugPrint('DEBUG: EventsPage delete eventId=$eventId');
+    final res = await http.delete(Uri.parse('$apiBase/events/$eventId'));
     if (!mounted) return;
 
     if (res.statusCode == 200) {
@@ -296,6 +337,7 @@ class _EventsPageState extends State<EventsPage> {
 
   @override
   Widget build(BuildContext context) {
+    print('DEBUG: EventsPage build');
     return Scaffold(
       appBar: AppBar(
         title: const Text('Events'),

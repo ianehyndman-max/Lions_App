@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'config.dart';
 
 class MembersPage extends StatefulWidget {
   const MembersPage({super.key});
@@ -40,7 +41,7 @@ class _MembersPageState extends State<MembersPage> {
     });
     try {
       // Load clubs (id -> name)
-      final clubsRes = await http.get(Uri.parse('http://localhost:8080/clubs'));
+      final clubsRes = await http.get(Uri.parse('$apiBase/clubs'));
       if (clubsRes.statusCode == 200) {
         final clubs = json.decode(clubsRes.body) as List;
         _clubNames = {
@@ -50,10 +51,14 @@ class _MembersPageState extends State<MembersPage> {
       }
 
       // Load members (filtered by user's club if set)
-      final url = _userClubId == null
+      /*final url = _userClubId == null
           ? 'http://localhost:8080/members'
           : 'http://localhost:8080/members?club_id=$_userClubId';
-      final membersRes = await http.get(Uri.parse(url));
+      final membersRes = await http.get(Uri.parse(url));*/
+      final membersUrl = _userClubId == null
+          ? '$apiBase/members'
+          : '$apiBase/members?club_id=$_userClubId';
+      final membersRes = await http.get(Uri.parse(membersUrl));
       if (membersRes.statusCode == 200) {
         _members = json.decode(membersRes.body) as List;
         // Sort alphabetically
@@ -101,10 +106,10 @@ class _MembersPageState extends State<MembersPage> {
 
     List<dynamic> clubs = [];
     try {
-      final res = await http.get(Uri.parse('http://localhost:8080/clubs'));
-      if (res.statusCode == 200) {
-        clubs = json.decode(res.body) as List;
-      }
+      final res = await http.get(Uri.parse('$apiBase/clubs'));
+       if (res.statusCode == 200) {
+         clubs = json.decode(res.body) as List;
+       }
     } catch (_) {}
 
     final nameCtrl = TextEditingController();
@@ -181,11 +186,11 @@ class _MembersPageState extends State<MembersPage> {
         'lions_club_id': selectedClubId,
       };
 
-      final res = await http.post(
-        Uri.parse('http://localhost:8080/members'),
+      final res = await http.put(
+        Uri.parse('$apiBase/members'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode(payload),
-      );
+       );
 
       if (!mounted) return;
       if (res.statusCode == 200 || res.statusCode == 201) {
@@ -340,7 +345,7 @@ class _MembersPageState extends State<MembersPage> {
 
     if (ok != true) return;
 
-    final res = await http.delete(Uri.parse('http://localhost:8080/members/$idStr'));
+    final res = await http.delete(Uri.parse('$apiBase/members/$idStr'));
 
     if (!mounted) return;
     if (res.statusCode == 200) {
@@ -357,6 +362,7 @@ class _MembersPageState extends State<MembersPage> {
 
   @override
   Widget build(BuildContext context) {
+    print('DEBUG: MembersPage build');
     return Scaffold(
       appBar: AppBar(
         title: const Text('Members'),

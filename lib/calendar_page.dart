@@ -5,6 +5,7 @@ import 'package:table_calendar/table_calendar.dart';
 import 'event_detail_page.dart';
 import 'create_event_dialog.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'config.dart';
 
 class CalendarPage extends StatefulWidget {
   const CalendarPage({super.key});
@@ -25,6 +26,7 @@ class _CalendarPageState extends State<CalendarPage> {
   @override
   void initState() {
     super.initState();
+    debugPrint('DEBUG: CalendarPage initState');
     _loadAdminFlag();
     _fetchEvents();
   }
@@ -35,13 +37,14 @@ class _CalendarPageState extends State<CalendarPage> {
       '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   Future<void> _fetchEvents() async {
+    debugPrint('DEBUG: CalendarPage _loadCalendar start');
     try {
       setState(() {
         _isLoading = true;
         _error = null;
       });
 
-      final res = await http.get(Uri.parse('http://localhost:8080/events'));
+      final res = await http.get(Uri.parse('$apiBase/events'));
       if (res.statusCode != 200) {
         setState(() {
           _error = 'Failed to load events: ${res.statusCode}';
@@ -146,6 +149,7 @@ class _CalendarPageState extends State<CalendarPage> {
 
   @override
   Widget build(BuildContext context) {
+    debugPrint('DEBUG: CalendarPage build');
     final dayEvents = _selectedDay == null ? const <Map<String, dynamic>>[] : _eventsForDay(_selectedDay!);
 
     return Scaffold(

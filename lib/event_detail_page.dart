@@ -7,6 +7,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 import 'widgets/email_html_editor.dart'; // selector: exports stub for Windows
+import 'config.dart';
 
 class EventDetailPage extends StatefulWidget {
   final dynamic eventId;
@@ -32,8 +33,8 @@ class _EventDetailPageState extends State<EventDetailPage> {
 
   int? _userMemberId;
   bool _isAdmin = false;
-  String? _clubEmail;
-  String? _clubPhone;
+  //String? _clubEmail;
+  //String? _clubPhone;
 
   final TextEditingController _notesController = TextEditingController();
   bool _isEditingNotes = false;
@@ -71,11 +72,13 @@ class _EventDetailPageState extends State<EventDetailPage> {
 
     http.Response res;
     try {
+      debugPrint('DEBUG: EventDetailPage _showEmailPreview -> $apiBase/events/${widget.eventId}/notify');
       res = await http.post(
-        Uri.parse('http://localhost:8080/events/${widget.eventId}/notify'),
+        Uri.parse('$apiBase/events/${widget.eventId}/notify'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode(flags),
       );
+      debugPrint('DEBUG: EventDetailPage _showEmailPreview status=${res.statusCode} body=${res.body}');
     } catch (e) {
       if (!mounted) return null;
       await showDialog(
@@ -360,15 +363,17 @@ class _EventDetailPageState extends State<EventDetailPage> {
       _loading = true;
       _error = null;
     });
+    debugPrint('DEBUG: EventDetailPage _load eventId=${widget.eventId}');
     try {
-      final res = await http.get(Uri.parse('http://localhost:8080/events/${widget.eventId}'));
+      final res = await http.get(Uri.parse('$apiBase/events/${widget.eventId}'));
+      debugPrint('DEBUG: EventDetail GET /events/${widget.eventId} status=${res.statusCode} body=${res.body}');
       if (res.statusCode == 200) {
         final data = json.decode(res.body) as Map<String, dynamic>;
+        debugPrint('DEBUG: EventDetail parsed payload keys=${data.keys.toList()} rolesPresent=${data.containsKey("roles")}');
         _event = data['event'] as Map<String, dynamic>;
         _roles = data['roles'] as List<dynamic>;
         _notesController.text = _event!['notes']?.toString() ?? '';
-        _clubEmail = _event!['club_email']?.toString();
-        _clubPhone = _event!['club_phone']?.toString();
+        debugPrint('DEBUG: EventDetail roles.length=${_roles.length}');
         setState(() => _loading = false);
 
         if (!_openedAutoPreview) {
@@ -399,8 +404,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sending email to all...')));
     try {
+      debugPrint('DEBUG: EventDetailPage _sendResendToAll -> $apiBase/events/${widget.eventId}/notify');
       final res = await http.post(
-        Uri.parse('http://localhost:8080/events/${widget.eventId}/notify'),
+        Uri.parse('$apiBase/events/${widget.eventId}/notify'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'resend_unfilled': true,
@@ -408,6 +414,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
           'body_html': draft['body_html'],
         }),
       );
+      debugPrint('DEBUG: EventDetailPage _sendResendToAll status=${res.statusCode} body=${res.body}');
       if (!mounted) return;
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -421,12 +428,55 @@ class _EventDetailPageState extends State<EventDetailPage> {
   }
 
   Future<void> _sendAssignedReminder() async {
-    final draft = await _showEmailPreview(mode: 'assigned');
+     final draft = await _showEmailPreview(mode: 'resend');
+    if (draft == null) return;
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sending email to all...')));
+    try {
+      debugPrint('DEBUG: EventDetailPage _sendResendToAll sending -> $apiBase/events/${widget.eventId}/notify payloadKeys=${draft.keys.length}');
+      final res = await http.post(
+        Uri.parse('$apiBase/events/${widget.eventId}/notify'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'resend_unfilled': true,
+          'subject': draft['subject'],
+          'body_html': draft['body_html'],
+        }),
+      );
+      debugPrint('DEBUG: EventDetailPage _sendResendToAll status=${res.statusCode} body=${res.body}');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).clearSnackBars();
+      if (res.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Email sent to all members.')));
+      } else {
+        // show dialog with server response to help diagnose
+       await showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Send failed'),
+            content: Text('Status: ${res.statusCode}\n\n${res.body}'),
+            actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+          ),
+        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed (${res.statusCode}): ${res.body}')));
+      }
+    } catch (e) {
+      debugPrint('ERROR: EventDetailPage _sendResendToAll exception: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).clearSnackBars();
+      await showDialog(
+        context: context,
+        builder: (_) => AlertDialog(title: const Text('Send failed (network)'), content: Text('Error: $e')),
+      );
+    }
+
+    /*final draft = await _showEmailPreview(mode: 'assigned');
     if (draft == null || !mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sending reminder to assigned volunteers...')));
     try {
+      debugPrint('DEBUG: EventDetailPage _sendResendToAll sending -> $apiBase/events/${widget.eventId}/notify payloadKeys=${draft.keys.length}');
       final res = await http.post(
-        Uri.parse('http://localhost:8080/events/${widget.eventId}/notify'),
+        Uri.parse('$apiBase/events/${widget.eventId}/notify'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'only_assigned': true,
@@ -434,6 +484,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
           'body_html': draft['body_html'],
         }),
       );
+      
       if (!mounted) return;
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -443,7 +494,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-    }
+    }*/
   }
 
   Future<void> _sendNewEventWithPreview() async {
@@ -452,8 +503,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sending new event email...')));
     try {
+      debugPrint('DEBUG: EventDetailPage _sendNewEventWithPreview -> $apiBase/events/${widget.eventId}/notify');
       final res = await http.post(
-        Uri.parse('http://localhost:8080/events/${widget.eventId}/notify'),
+        Uri.parse('$apiBase/events/${widget.eventId}/notify'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'subject': draft['subject'],
@@ -537,8 +589,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
           _event!['event_type_id'] is int ? _event!['event_type_id'] : int.parse(_event!['event_type_id'].toString());
       final clubId = _event!['club_id'] is int ? _event!['club_id'] : int.parse(_event!['club_id'].toString());
 
+      debugPrint('DEBUG: EventDetailPage _saveNotes -> PUT $apiBase/events/${widget.eventId}');
       final res = await http.put(
-        Uri.parse('http://localhost:8080/events/${widget.eventId}'),
+        Uri.parse('$apiBase/events/${widget.eventId}'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'event_type_id': eventTypeId,
@@ -591,8 +644,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
       ),
     );
     if (ok != true) return;
+    debugPrint('DEBUG: EventDetailPage _volunteerSelf -> POST $apiBase/events/${widget.eventId}/volunteer');
     final post = await http.post(
-      Uri.parse('http://localhost:8080/events/${widget.eventId}/volunteer'),
+      Uri.parse('$apiBase/events/${widget.eventId}/volunteer'),
       headers: {'Content-Type': 'application/json'},
       body: json.encode({'role_id': role['role_id'], 'member_id': _userMemberId}),
     );
@@ -617,17 +671,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
             const Text('We understand that circumstances change!', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
             const Text('To withdraw from your volunteer commitment, please contact the club secretary:'),
-            const SizedBox(height: 16),
-            if (_clubPhone != null && _clubPhone!.isNotEmpty) ...[
-              Row(children: [const Icon(Icons.phone, size: 20), const SizedBox(width: 8), Text(_clubPhone!, style: const TextStyle(fontWeight: FontWeight.bold))]),
-              const SizedBox(height: 8),
-            ],
-            if (_clubEmail != null && _clubEmail!.isNotEmpty) ...[
-              Row(children: [const Icon(Icons.email, size: 20), const SizedBox(width: 8), Flexible(child: Text(_clubEmail!, style: const TextStyle(fontWeight: FontWeight.bold)))]),
-            ],
-            if ((_clubPhone == null || _clubPhone!.isEmpty) && (_clubEmail == null || _clubEmail!.isEmpty))
-              const Text('Please contact your club secretary.', style: TextStyle(fontWeight: FontWeight.bold)),
-          ],
+            const SizedBox(height: 16),]
         ),
         actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
       ),
@@ -641,7 +685,8 @@ class _EventDetailPageState extends State<EventDetailPage> {
     }
     if (_event == null) return;
     final clubId = _event!['club_id'];
-    final res = await http.get(Uri.parse('http://localhost:8080/members?club_id=$clubId'));
+    debugPrint('DEBUG: EventDetailPage _pickVolunteer -> GET $apiBase/members?club_id=$clubId');
+    final res = await http.get(Uri.parse('$apiBase/members?club_id=$clubId'));
     if (res.statusCode != 200) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to load members')));
@@ -696,8 +741,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
       ),
     );
     if (choice == null && role['member_id'] != null) return;
+    debugPrint('DEBUG: EventDetailPage _pickVolunteer -> POST $apiBase/events/${widget.eventId}/volunteer');
     final post = await http.post(
-      Uri.parse('http://localhost:8080/events/${widget.eventId}/volunteer'),
+      Uri.parse('$apiBase/events/${widget.eventId}/volunteer'),
       headers: {'Content-Type': 'application/json'},
       body: json.encode({'role_id': role['role_id'], 'member_id': choice}),
     );
@@ -740,8 +786,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
     final roleName = nameCtrl.text.trim();
     if (roleName.isEmpty) return;
 
+    debugPrint('DEBUG: EventDetailPage _addRole -> POST $apiBase/events/${widget.eventId}/roles');
     final res = await http.post(
-      Uri.parse('http://localhost:8080/events/${widget.eventId}/roles'),
+      Uri.parse('$apiBase/events/${widget.eventId}/roles'),
       headers: {'Content-Type': 'application/json'},
       body: json.encode({
         'role_name': roleName,
@@ -776,7 +823,8 @@ class _EventDetailPageState extends State<EventDetailPage> {
 
     if (ok != true) return;
 
-    final res = await http.delete(Uri.parse('http://localhost:8080/events/${widget.eventId}/roles/$roleId'));
+    debugPrint('DEBUG: EventDetailPage _deleteRole -> DELETE $apiBase/events/${widget.eventId}/roles/$roleId');
+    final res = await http.delete(Uri.parse('$apiBase/events/${widget.eventId}/roles/$roleId'));
     if (!mounted) return;
     if (res.statusCode == 200 || res.statusCode == 204) {
       await _load();
