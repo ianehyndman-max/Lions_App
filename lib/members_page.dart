@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'config.dart';
+import 'auth_store.dart';
+import 'api_client.dart';
+import 'manage_clubs_page.dart';
 
 class MembersPage extends StatefulWidget {
   const MembersPage({super.key});
@@ -51,10 +54,7 @@ class _MembersPageState extends State<MembersPage> {
       }
 
       // Load members (filtered by user's club if set)
-      /*final url = _userClubId == null
-          ? 'http://localhost:8080/members'
-          : 'http://localhost:8080/members?club_id=$_userClubId';
-      final membersRes = await http.get(Uri.parse(url));*/
+      
       final membersUrl = _userClubId == null
           ? '$apiBase/members'
           : '$apiBase/members?club_id=$_userClubId';
@@ -96,6 +96,108 @@ class _MembersPageState extends State<MembersPage> {
     return null;
   }
 
+  Future<void> _openEditOwnProfileDialog() async {
+  final prefs = await SharedPreferences.getInstance();
+  final memberId = prefs.getInt('member_id');
+  if (memberId == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Member ID not found')),
+    );
+    return;
+  }
+
+  // Find current member in the list
+  final member = _members.firstWhere(
+    (m) => _toInt(m['id']) == memberId,
+    orElse: () => <String, dynamic>{},
+  );
+
+  if (member.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Your profile not found')),
+    );
+    return;
+  }
+
+  final nameCtrl = TextEditingController(text: member['name']?.toString() ?? '');
+  final emailCtrl = TextEditingController(text: member['email']?.toString() ?? '');
+  final phoneCtrl = TextEditingController(text: member['phone_number']?.toString() ?? '');
+
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Edit My Profile'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              decoration: const InputDecoration(labelText: 'Name'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: emailCtrl,
+              decoration: const InputDecoration(labelText: 'Email'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: phoneCtrl,
+              decoration: const InputDecoration(labelText: 'Phone number'),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Note: Club and admin status can only be changed by administrators.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: nameCtrl.text.trim().isEmpty
+              ? null
+              : () => Navigator.pop(ctx, true),
+          child: const Text('Save'),
+        ),
+      ],
+    ),
+  );
+
+  if (ok == true) {
+    final payload = {
+      'name': nameCtrl.text.trim(),
+      'email': emailCtrl.text.trim(),
+      'phone_number': phoneCtrl.text.trim(),
+    };
+
+    debugPrint('DEBUG: About to update own profile memberId=$memberId with payload: $payload');
+
+    final res = await ApiClient.put('/members/$memberId', body: payload);
+    debugPrint('DEBUG: Update own profile response status=${res.statusCode} body=${res.body}');
+
+    if (!mounted) return;
+    if (res.statusCode == 200) {
+      // Update local SharedPreferences with new name
+      await prefs.setString('name', nameCtrl.text.trim());
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Profile updated')),
+      );
+      _loadData();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Update failed: ${res.body}')),
+      );
+    }
+  }
+}
+
   Future<void> _openCreateMemberDialog() async {
     if (!_isAdmin) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -112,12 +214,18 @@ class _MembersPageState extends State<MembersPage> {
        }
     } catch (_) {}
 
+    final isSuper = await AuthStore.isSuper();
     final nameCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
 
     // Default to user's club if set
-    int? selectedClubId = _userClubId ?? (_toInt(clubs.firstOrNull?['id']));
+    int? selectedClubId;
+    if (!isSuper && _userClubId != null) {
+      selectedClubId = _userClubId;
+    } else if (clubs.isNotEmpty) {
+      selectedClubId = _toInt(clubs.first['id']);
+    }
 
     final ok = await showDialog<bool>(
       context: context,
@@ -156,8 +264,12 @@ class _MembersPageState extends State<MembersPage> {
                       })
                       .where((e) => e.value != null)
                       .toList(),
-                  onChanged: (v) => setDlg(() => selectedClubId = v),
-                  decoration: const InputDecoration(labelText: 'Club'),
+                  onChanged: isSuper ? (v) => setDlg(() => selectedClubId = v) : null,  // Lock for non-super users
+                  decoration: InputDecoration(
+                    labelText: 'Club',
+                    suffixIcon: isSuper ? null : const Icon(Icons.lock, size: 16),
+                    helperText: isSuper ? null : 'Locked to your club',
+                  ),
                 ),
               ],
             ),
@@ -186,11 +298,7 @@ class _MembersPageState extends State<MembersPage> {
         'lions_club_id': selectedClubId,
       };
 
-      final res = await http.put(
-        Uri.parse('$apiBase/members'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode(payload),
-       );
+      final res = await ApiClient.post('/members', body: payload);
 
       if (!mounted) return;
       if (res.statusCode == 200 || res.statusCode == 201) {
@@ -214,6 +322,8 @@ class _MembersPageState extends State<MembersPage> {
       return;
     }
 
+    final isSuper = await AuthStore.isSuper();  // Add this line
+
     List<dynamic> clubs = [];
     try {
       final res = await http.get(Uri.parse('http://localhost:8080/clubs'));
@@ -228,6 +338,7 @@ class _MembersPageState extends State<MembersPage> {
     final phoneCtrl = TextEditingController(text: member['phone_number']?.toString() ?? '');
 
     int? selectedClubId = _toInt(member['lions_club_id']);
+    bool isAdminMember = member['is_admin'] == 1 || member['is_admin'] == true;
 
     final ok = await showDialog<bool>(
       context: context,
@@ -266,8 +377,25 @@ class _MembersPageState extends State<MembersPage> {
                       })
                       .where((e) => e.value != null)
                       .toList(),
-                  onChanged: (v) => setDlg(() => selectedClubId = v),
-                  decoration: const InputDecoration(labelText: 'Club'),
+                  onChanged: isSuper ? (v) => setDlg(() => selectedClubId = v) : null,  // Lock for non-super users
+                  decoration: InputDecoration(
+                    labelText: 'Club',
+                    suffixIcon: isSuper ? null : const Icon(Icons.lock, size: 16),
+                    helperText: isSuper ? null : 'Locked to your club',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                CheckboxListTile(
+                  value: isAdminMember,
+                  onChanged: (val) {
+                    setDlg(() {
+                      isAdminMember = val ?? false;
+                    });
+                  },
+                  title: const Text('Admin Access'),
+                  subtitle: const Text('Can create/edit members and events'),
+                  controlAffinity: ListTileControlAffinity.leading,
+                  contentPadding: EdgeInsets.zero,
                 ),
               ],
             ),
@@ -294,13 +422,13 @@ class _MembersPageState extends State<MembersPage> {
         'email': emailCtrl.text.trim(),
         'phone_number': phoneCtrl.text.trim(),
         'lions_club_id': selectedClubId,
+        'is_admin': isAdminMember ? 1 : 0,
       };
 
-      final res = await http.put(
-        Uri.parse('http://localhost:8080/members/$idStr'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode(payload),
-      );
+      debugPrint('DEBUG: About to update member $idStr with payload: $payload');
+
+      final res = await ApiClient.put('/members/$idStr', body: payload);
+      debugPrint('DEBUG: Update response status=${res.statusCode} body=${res.body}');
 
       if (!mounted) return;
       if (res.statusCode == 200) {
@@ -365,21 +493,48 @@ class _MembersPageState extends State<MembersPage> {
     print('DEBUG: MembersPage build');
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Members'),
-        backgroundColor: Colors.red,
-        actions: [
-          IconButton(
-            tooltip: 'Refresh',
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadData,
-          ),
-          if (_isAdmin)
-            IconButton(
-              tooltip: 'Add Member',
-              icon: const Icon(Icons.person_add),
-              onPressed: _openCreateMemberDialog,
-            ),
-        ],
+  title: const Text('Members'),
+  backgroundColor: Colors.red,
+  actions: [
+    // My Profile button (visible to all users)
+    IconButton(
+      icon: const Icon(Icons.account_circle),
+      tooltip: 'My Profile',
+      onPressed: _openEditOwnProfileDialog,
+    ),
+    // Refresh button (visible to all users)
+    IconButton(
+      icon: const Icon(Icons.refresh),
+      tooltip: 'Refresh',
+      onPressed: _loadData,
+    ),
+    // Add Member button (admin/super only)
+    if (_isAdmin)
+      IconButton(
+        icon: const Icon(Icons.person_add),
+        tooltip: 'Add Member',
+        onPressed: _openCreateMemberDialog,
+      ),
+    // Manage Clubs button (super only)
+    FutureBuilder<bool>(
+      future: AuthStore.isSuper(),
+      builder: (context, snapshot) {
+        if (snapshot.data == true) {
+          return IconButton(
+            icon: const Icon(Icons.business),
+            tooltip: 'Manage Clubs',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ManageClubsPage()),
+              );
+            },
+          );
+        }
+        return const SizedBox.shrink();
+      },
+    ),
+  ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())

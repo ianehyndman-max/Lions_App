@@ -398,131 +398,67 @@ class _EventDetailPageState extends State<EventDetailPage> {
     }
   }
 
-  Future<void> _sendResendToAll() async {
-    final draft = await _showEmailPreview(mode: 'resend');
-    if (draft == null) return;
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sending email to all...')));
-    try {
-      debugPrint('DEBUG: EventDetailPage _sendResendToAll -> $apiBase/events/${widget.eventId}/notify');
-      final res = await http.post(
-        Uri.parse('$apiBase/events/${widget.eventId}/notify'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'resend_unfilled': true,
-          'subject': draft['subject'],
-          'body_html': draft['body_html'],
-        }),
-      );
-      debugPrint('DEBUG: EventDetailPage _sendResendToAll status=${res.statusCode} body=${res.body}');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res.statusCode == 200 ? 'Email sent to all members.' : 'Failed (${res.statusCode}): ${res.body}')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-    }
-  }
+  // Unified send flow: mode = 'new' | 'resend' | 'assigned'
+  Future<void> _sendEmailFlow(String mode) async {
+   // Build preview (dry_run) and allow edit
+   final draft = await _showEmailPreview(mode: mode);
+   if (draft == null || !mounted) return;
+   final sendingLabel = switch (mode) {
+     'new' => 'Sending new event email...',
+     'resend' => 'Sending email to all...',
+     'assigned' => 'Sending reminder to assigned volunteers...',
+     _ => 'Sending email...',
+   };
+   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(sendingLabel)));
+   final payload = <String, dynamic>{
+     'subject': draft['subject'],
+     'body_html': draft['body_html'],
+   };
+   if (mode == 'resend') payload['resend_unfilled'] = true;
+   if (mode == 'assigned') payload['only_assigned'] = true;
 
-  Future<void> _sendAssignedReminder() async {
-     final draft = await _showEmailPreview(mode: 'resend');
-    if (draft == null) return;
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sending email to all...')));
-    try {
-      debugPrint('DEBUG: EventDetailPage _sendResendToAll sending -> $apiBase/events/${widget.eventId}/notify payloadKeys=${draft.keys.length}');
-      final res = await http.post(
-        Uri.parse('$apiBase/events/${widget.eventId}/notify'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'resend_unfilled': true,
-          'subject': draft['subject'],
-          'body_html': draft['body_html'],
-        }),
-      );
-      debugPrint('DEBUG: EventDetailPage _sendResendToAll status=${res.statusCode} body=${res.body}');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).clearSnackBars();
-      if (res.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Email sent to all members.')));
-      } else {
-        // show dialog with server response to help diagnose
+   try {
+     debugPrint('DEBUG: EventDetailPage _sendEmailFlow($mode) POST $apiBase/events/${widget.eventId}/notify payload=${payload.keys}');
+     final res = await http.post(
+       Uri.parse('$apiBase/events/${widget.eventId}/notify'),
+       headers: {'Content-Type': 'application/json'},
+       body: json.encode(payload),
+     );
+     if (!mounted) return;
+     ScaffoldMessenger.of(context).clearSnackBars();
+     final successMsg = switch (mode) {
+       'new' => 'New event email sent.',
+       'resend' => 'Email sent to all members.',
+       'assigned' => 'Reminder sent to assigned volunteers.',
+       _ => 'Email sent.',
+     };
+     if (res.statusCode == 200) {
+       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(successMsg)));
+     } else {
        await showDialog(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('Send failed'),
-            content: Text('Status: ${res.statusCode}\n\n${res.body}'),
-            actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
-          ),
-        );
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed (${res.statusCode}): ${res.body}')));
-      }
-    } catch (e) {
-      debugPrint('ERROR: EventDetailPage _sendResendToAll exception: $e');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).clearSnackBars();
-      await showDialog(
-        context: context,
-        builder: (_) => AlertDialog(title: const Text('Send failed (network)'), content: Text('Error: $e')),
-      );
-    }
+         context: context,
+         builder: (_) => AlertDialog(
+           title: const Text('Send failed'),
+           content: Text('Status: ${res.statusCode}\n\n${res.body}'),
+           actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+         ),
+       );
+       ScaffoldMessenger.of(context).showSnackBar(
+         SnackBar(content: Text('Failed (${res.statusCode}): ${res.body}')),
+       );
+     }
+   } catch (e) {
+     if (!mounted) return;
+     ScaffoldMessenger.of(context).clearSnackBars();
+     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+   }
+  } 
 
-    /*final draft = await _showEmailPreview(mode: 'assigned');
-    if (draft == null || !mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sending reminder to assigned volunteers...')));
-    try {
-      debugPrint('DEBUG: EventDetailPage _sendResendToAll sending -> $apiBase/events/${widget.eventId}/notify payloadKeys=${draft.keys.length}');
-      final res = await http.post(
-        Uri.parse('$apiBase/events/${widget.eventId}/notify'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'only_assigned': true,
-          'subject': draft['subject'],
-          'body_html': draft['body_html'],
-        }),
-      );
-      
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res.statusCode == 200 ? 'Reminder sent to assigned volunteers.' : 'Failed (${res.statusCode}): ${res.body}')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-    }*/
-  }
+  Future<void> _sendResendToAll() async => _sendEmailFlow('resend');
 
-  Future<void> _sendNewEventWithPreview() async {
-    final draft = await _showEmailPreview(mode: 'new');
-    if (draft == null) return;
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sending new event email...')));
-    try {
-      debugPrint('DEBUG: EventDetailPage _sendNewEventWithPreview -> $apiBase/events/${widget.eventId}/notify');
-      final res = await http.post(
-        Uri.parse('$apiBase/events/${widget.eventId}/notify'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'subject': draft['subject'],
-          'body_html': draft['body_html'],
-        }),
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res.statusCode == 200 ? 'New event email sent.' : 'Failed (${res.statusCode}): ${res.body}')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-    }
-  }
+  Future<void> _sendAssignedReminder() async => _sendEmailFlow('assigned');
+
+  Future<void> _sendNewEventWithPreview() async => _sendEmailFlow('new');
 
   Future<void> _printEvent() async {
     if (_event == null) return;
@@ -582,45 +518,73 @@ class _EventDetailPageState extends State<EventDetailPage> {
   }
 
   Future<void> _saveNotes() async {
-    if (_event == null) return;
-    setState(() => _loading = true);
-    try {
-      final eventTypeId =
-          _event!['event_type_id'] is int ? _event!['event_type_id'] : int.parse(_event!['event_type_id'].toString());
-      final clubId = _event!['club_id'] is int ? _event!['club_id'] : int.parse(_event!['club_id'].toString());
+  if (_event == null) return;
+  setState(() => _loading = true);
+  try {
+    final eventTypeId =
+        _event!['event_type_id'] is int ? _event!['event_type_id'] : int.parse(_event!['event_type_id'].toString());
+    final clubId = _event!['club_id'] is int ? _event!['club_id'] : int.parse(_event!['club_id'].toString());
 
-      debugPrint('DEBUG: EventDetailPage _saveNotes -> PUT $apiBase/events/${widget.eventId}');
-      final res = await http.put(
-        Uri.parse('$apiBase/events/${widget.eventId}'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'event_type_id': eventTypeId,
-          'lions_club_id': clubId,
-          'event_date': _event!['date'],
-          'location': _event!['location'] ?? '',
-          'notes': _notesController.text,
-        }),
-      );
-      if (!mounted) return;
-      if (res.statusCode == 200) {
-        setState(() {
-          _isEditingNotes = false;
-          _event!['notes'] = _notesController.text;
-          _loading = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Notes saved')));
-        await _load();
-      } else {
-        setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: ${res.body}')));
-      }
-    } catch (e) {
+    // Get member ID for authentication
+    final prefs = await SharedPreferences.getInstance();
+    final memberId = prefs.getInt('member_id');
+    
+    // NEW: Debug logging
+    debugPrint('🔵 memberId from prefs: $memberId');
+    debugPrint('🔵 _userMemberId from state: $_userMemberId');
+
+    // Use _userMemberId from state if SharedPreferences is null
+    final authMemberId = memberId ?? _userMemberId;
+    
+    debugPrint('🔵 Using authMemberId: $authMemberId');
+
+    if (authMemberId == null) {
       setState(() => _loading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Not authenticated. Please log in again.')),
+      );
+      return;
+    }
+
+    debugPrint('DEBUG: EventDetailPage _saveNotes -> PUT $apiBase/events/${widget.eventId}');
+    final res = await http.put(
+      Uri.parse('$apiBase/events/${widget.eventId}'),
+      headers: {
+        'Content-Type': 'application/json',
+        'x-member-id': authMemberId.toString(),
+      },
+      body: json.encode({
+        'event_type_id': eventTypeId,
+        'lions_club_id': clubId,
+        'event_date': _event!['date'],
+        'location': _event!['location'] ?? '',
+        'notes': _notesController.text,
+      }),
+    );
+    
+    debugPrint('🔵 Response status: ${res.statusCode}');
+    debugPrint('🔵 Response body: ${res.body}');
+    
+    if (!mounted) return;
+    if (res.statusCode == 200) {
+      setState(() {
+        _isEditingNotes = false;
+        _event!['notes'] = _notesController.text;
+        _loading = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Notes saved')));
+      await _load();
+    } else {
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: ${res.body}')));
+    }
+  } catch (e) {
+    setState(() => _loading = false);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
   }
+}
 
   Future<void> _volunteerSelf(Map<String, dynamic> role) async {
     if (_userMemberId == null) {
@@ -646,7 +610,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
     if (ok != true) return;
     debugPrint('DEBUG: EventDetailPage _volunteerSelf -> POST $apiBase/events/${widget.eventId}/volunteer');
     final post = await http.post(
-      Uri.parse('$apiBase/events/${widget.eventId}/volunteer'),
+      Uri.parse('$apiBase/events/${widget.eventId}/volunteers'),
       headers: {'Content-Type': 'application/json'},
       body: json.encode({'role_id': role['role_id'], 'member_id': _userMemberId}),
     );
@@ -743,7 +707,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
     if (choice == null && role['member_id'] != null) return;
     debugPrint('DEBUG: EventDetailPage _pickVolunteer -> POST $apiBase/events/${widget.eventId}/volunteer');
     final post = await http.post(
-      Uri.parse('$apiBase/events/${widget.eventId}/volunteer'),
+      Uri.parse('$apiBase/events/${widget.eventId}/volunteers'),
       headers: {'Content-Type': 'application/json'},
       body: json.encode({'role_id': role['role_id'], 'member_id': choice}),
     );
@@ -848,39 +812,44 @@ class _EventDetailPageState extends State<EventDetailPage> {
               tooltip: 'Print Event Details',
               onPressed: _printEvent,
             ),
-        ],
-      ),
-      floatingActionButton: _isAdmin
-          ? Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                FloatingActionButton.extended(
-                  heroTag: 'fab-email-assigned',
-                  onPressed: _sendAssignedReminder,
-                  icon: const Icon(Icons.mark_email_unread_outlined),
-                  label: const Text('Email Assigned'),
-                  backgroundColor: Colors.blue,
-                ),
-                const SizedBox(height: 10),
-                FloatingActionButton.extended(
-                  heroTag: 'fab-resend-all',
-                  onPressed: _sendResendToAll,
-                  icon: const Icon(Icons.outgoing_mail),
-                  label: Text(_hasUnassigned ? 'Resend (unfilled)' : 'Resend to All'),
-                  backgroundColor: _hasUnassigned ? Colors.orange : Colors.grey.shade700,
-                ),
-                const SizedBox(height: 10),
-                if (_isOther)
-                  FloatingActionButton.extended(
-                    heroTag: 'fab-add-role',
-                    onPressed: _addRole,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add Role'),
-                    backgroundColor: Colors.red,
+          // NEW: Add this email menu button
+          if (_isAdmin)
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.email),
+              tooltip: 'Send Emails',
+              onSelected: (value) {
+                if (value == 'assigned') {
+                  _sendAssignedReminder();
+                } else if (value == 'all') {
+                  _sendResendToAll();
+                }
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'assigned',
+                  child: Row(
+                    children: [
+                      Icon(Icons.mark_email_unread_outlined, size: 20, color: Colors.blue),
+                      SizedBox(width: 12),
+                      Text('Email Assigned'),
+                    ],
                   ),
+                ),
+                PopupMenuItem(
+                  value: 'all',
+                  child: Row(
+                    children: [
+                      Icon(Icons.outgoing_mail, size: 20, color: Colors.grey),
+                      SizedBox(width: 12),
+                      Text(_hasUnassigned ? 'Resend (unfilled)' : 'Resend to All'),
+                    ],
+                  ),
+                ),
               ],
-            )
-          : null,
+            ),
+        ],
+      ),  
+       
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null

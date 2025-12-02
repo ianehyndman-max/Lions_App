@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'main.dart';
 import 'config.dart';
 import 'dart:math';
+import 'auth_store.dart';
 
 class OnboardingPage extends StatefulWidget {
   const OnboardingPage({super.key});
@@ -73,27 +74,47 @@ class _OnboardingPageState extends State<OnboardingPage> {
   }
 
   Future<void> _saveAndContinue() async {
-  if (_selectedClubId == null || _selectedMemberId == null) return;
+    if (_selectedClubId == null || _selectedMemberId == null) return;
 
-  final member = _members.firstWhere((m) => m['id'].toString() == _selectedMemberId.toString());
-  
-  // Fix: Handle MySQL Blob/binary data for is_admin
-  final isAdminRaw = member['is_admin'];
-  final isAdmin = isAdminRaw == 1 || 
-                  isAdminRaw == true || 
-                  isAdminRaw == '1' ||
-                  (isAdminRaw is List && isAdminRaw.isNotEmpty && isAdminRaw[0] == 1);
+    final member = _members.firstWhere((m) => m['id'].toString() == _selectedMemberId.toString());
+    // Debug: see what the API actually returned
+    debugPrint('DEBUG: Raw member data from API: $member');
+    debugPrint('DEBUG: is_admin raw value: ${member['is_admin']} (type: ${member['is_admin'].runtimeType})');
+    debugPrint('DEBUG: is_super raw value: ${member['is_super']} (type: ${member['is_super'].runtimeType})');
+    
+    // Handle MySQL Blob/binary data for is_admin and is_super
+    final isAdminRaw = member['is_admin'];
+    final isAdmin = isAdminRaw == 1 || 
+                    isAdminRaw == true || 
+                    isAdminRaw == '1' ||
+                    (isAdminRaw is List && isAdminRaw.isNotEmpty && isAdminRaw[0] == 1);
+    
+    final isSuperRaw = member['is_super'];
+    final isSuper = isSuperRaw == 1 || 
+                    isSuperRaw == true || 
+                    isSuperRaw == '1' ||
+                    (isSuperRaw is List && isSuperRaw.isNotEmpty && isSuperRaw[0] == 1);
+    
+    debugPrint('DEBUG: Parsed is_admin=$isAdmin is_super=$isSuper');
 
-  final prefs = await SharedPreferences.getInstance();
-  await prefs.setInt('club_id', _selectedClubId!);
-  await prefs.setInt('member_id', _selectedMemberId!);
-  await prefs.setBool('is_admin', isAdmin);
+    // Build normalized member map for AuthStore
+    final memberData = {
+      'id': _selectedMemberId.toString(),
+      'lions_club_id': _selectedClubId.toString(),
+      'is_admin': isAdmin,
+      'is_super': isSuper,
+    };
 
-  if (!mounted) return;
-  Navigator.of(context).pushReplacement(
-    MaterialPageRoute(builder: (_) => const MainScreen()),
-  );
-}
+    debugPrint('DEBUG: Saving profile -> member_id=${memberData['id']} club_id=${memberData['lions_club_id']} is_admin=$isAdmin is_super=$isSuper');
+    
+    // Save using centralized helper
+    await AuthStore.saveProfile(memberData);
+
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const MainScreen()),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {

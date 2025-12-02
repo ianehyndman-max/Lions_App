@@ -6,6 +6,7 @@ import 'event_detail_page.dart';
 import 'create_event_dialog.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'config.dart';
+import 'api_client.dart';
 
 class CalendarPage extends StatefulWidget {
   const CalendarPage({super.key});
@@ -19,6 +20,7 @@ class _CalendarPageState extends State<CalendarPage> {
   String? _error;
   final Map<DateTime, List<Map<String, dynamic>>> _eventsByDay = {};
   bool _isAdmin = false;
+  int? _userClubId;
 
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
@@ -27,6 +29,7 @@ class _CalendarPageState extends State<CalendarPage> {
   void initState() {
     super.initState();
     debugPrint('DEBUG: CalendarPage initState');
+    _loadUserClubId();
     _loadAdminFlag();
     _fetchEvents();
   }
@@ -36,6 +39,13 @@ class _CalendarPageState extends State<CalendarPage> {
   String _fmt(DateTime d) =>
       '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
+  Future<void> _loadUserClubId() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _userClubId = prefs.getInt('club_id');
+    });
+  }
+  
   Future<void> _fetchEvents() async {
     debugPrint('DEBUG: CalendarPage _loadCalendar start');
     try {
@@ -44,7 +54,7 @@ class _CalendarPageState extends State<CalendarPage> {
         _error = null;
       });
 
-      final res = await http.get(Uri.parse('$apiBase/events'));
+      final res = await ApiClient.get('/events/calendar');  // Use calendar endpoint for all events
       if (res.statusCode != 200) {
         setState(() {
           _error = 'Failed to load events: ${res.statusCode}';
@@ -124,6 +134,7 @@ class _CalendarPageState extends State<CalendarPage> {
       initialDate: day,
       showSendEmailsToggle: true,  // user can choose
       defaultSendEmails: false,    // default OFF on Calendar
+      userClubId: _userClubId,  // Add this line
     );
     if (!mounted || result == null) return;
 

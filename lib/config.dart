@@ -8,7 +8,7 @@ import 'package:flutter/foundation.dart';
 /// Change the mobileHost value when you deploy (e.g. https://api.example.com).
 String getApiBase() {
   const mobileHost = 'http://192.168.4.39:8080';
-  const devApiHost = 'http://localhost:8080';
+  const devApiHost = 'http://127.0.0.1:8080';
 
   if (kIsWeb) {
     // Always use explicit dev API host for web dev so requests go to backend not the web server.
