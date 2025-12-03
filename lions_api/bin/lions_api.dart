@@ -42,21 +42,15 @@ void debugDbDiagnostics({
 
 // ---------------- Config (env first) ----------------
 String _envOr(String key, String fallback) => Platform.environment[key] ?? fallback;
-final _dbHost = _envOr('DB_HOST', '127.0.0.1');
+final _dbHost = _envOr('DB_HOST', 'lions-club-db.c12ge624w2tu.ap-southeast-2.rds.amazonaws.com');
 final _dbPort = int.tryParse(Platform.environment['DB_PORT'] ?? '') ?? 3306;
-final _dbUser = _envOr('DB_USER', 'root');
-final _dbPass = _envOr('DB_PASS', 'IanMySql1*.*');
+final _dbUser = _envOr('DB_USER', 'admin');
+final _dbPass = _envOr('DB_PASS', 'ML4231LionsApp!');
 final _dbName = _envOr('DB_NAME', 'lions');
 
-//final _smtpUser = Platform.environment['SMTP_USER'] ?? '';
-//final _smtpPass = Platform.environment['SMTP_PASS'] ?? '';
 
-final _smtpUser = Platform.environment['SMTP_USER']?.trim().isNotEmpty == true
-    ? Platform.environment['SMTP_USER']!.trim()
-    : 'ianehyndman@gmail.com'; // TODO: remove before commit
-final _smtpPass = Platform.environment['SMTP_PASS']?.trim().isNotEmpty == true
-    ? Platform.environment['SMTP_PASS']!.trim()
-    : 'wtmsyhneyutrunms'; // TODO: remove before commit
+final _smtpUser = _envOr('SMTP_USER', '');
+final _smtpPass = _envOr('SMTP_PASS', '');
 
 // ---------------- DB connect ----------------
 Future<MySQLConnection> _connect() async {
