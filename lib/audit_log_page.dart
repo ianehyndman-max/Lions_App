@@ -82,17 +82,21 @@ class _AuditLogPageState extends State<AuditLogPage> {
       ),
       body: Column(
         children: [
-          // Filters
-          Padding(
+          // Filters - FIXED FOR MOBILE
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.all(16.0),
             child: Row(
               children: [
-                Expanded(
+                // Entity Type Filter
+                SizedBox(
+                  width: 200,
                   child: DropdownButtonFormField<String?>(
                     value: _filterEntityType,
                     decoration: const InputDecoration(
                       labelText: 'Entity Type',
                       border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     ),
                     items: const [
                       DropdownMenuItem(value: null, child: Text('All Types')),
@@ -107,12 +111,15 @@ class _AuditLogPageState extends State<AuditLogPage> {
                   ),
                 ),
                 const SizedBox(width: 16),
-                Expanded(
+                // Action Filter
+                SizedBox(
+                  width: 200,
                   child: DropdownButtonFormField<String?>(
                     value: _filterAction,
                     decoration: const InputDecoration(
                       labelText: 'Action',
                       border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     ),
                     items: const [
                       DropdownMenuItem(value: null, child: Text('All Actions')),
@@ -127,6 +134,7 @@ class _AuditLogPageState extends State<AuditLogPage> {
                   ),
                 ),
                 const SizedBox(width: 16),
+                // Clear Filters Button
                 ElevatedButton.icon(
                   onPressed: () {
                     setState(() {

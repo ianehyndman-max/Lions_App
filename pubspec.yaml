@@ -57,7 +57,7 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   lints: ^6.0.0
   test_api: ^0.7.6
-
+  flutter_launcher_icons: ^0.13.1  # Add this line
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -72,7 +72,10 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
 
-
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/lions_icon.png"
 
   # To add assets to your application, add an assets section, like this:
   # assets:

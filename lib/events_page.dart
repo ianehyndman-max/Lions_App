@@ -138,6 +138,7 @@ class _EventsPageState extends State<EventsPage> {
       debugPrint('DEBUG: EventsPage _composeAndSendNewEventEmail -> fetching event details');
       detail = await http.get(Uri.parse('$apiBase/events/$eventId'));
       debugPrint('DEBUG: EventsPage _composeAndSendNewEventEmail -> event detail status=${detail.statusCode}');
+      debugPrint('DEBUG: EventsPage _composeAndSendNewEventEmail -> event detail body=${detail.body}');
     } catch (e) {
       debugPrint('ERROR: EventsPage _composeAndSendNewEventEmail -> event fetch failed: $e');
       if (!mounted) return;
@@ -164,6 +165,7 @@ class _EventsPageState extends State<EventsPage> {
         body: json.encode({'dry_run': true}),
       );
        debugPrint('DEBUG: EventsPage _composeAndSendNewEventEmail -> preview status=${preview.statusCode}');
+       debugPrint('DEBUG: EventsPage _composeAndSendNewEventEmail -> preview body=${preview.body}');  // ⬅️ ADD THIS LINE
     } catch (e) {
       debugPrint('ERROR: EventsPage _composeAndSendNewEventEmail -> preview fetch failed: $e');
       if (!mounted) return;
@@ -577,18 +579,21 @@ Widget build(BuildContext context) {
             ? Center(child: Text(_error!, style: const TextStyle(color: Colors.red)))
             : Column(
                 children: [
-                  // Filter Row
-                  Padding(
+                  // Filter Row - FIXED FOR MOBILE
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.all(16.0),
                     child: Row(
                       children: [
                         // Event Type Filter
-                        Expanded(
+                        SizedBox(
+                          width: 200,
                           child: DropdownButtonFormField<int?>(
                             value: _filterEventTypeId,
                             decoration: const InputDecoration(
                               labelText: 'Event Type',
                               border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                             ),
                             items: [
                               const DropdownMenuItem<int?>(value: null, child: Text('All Types')),
@@ -605,12 +610,14 @@ Widget build(BuildContext context) {
                         ),
                         const SizedBox(width: 16),
                         // Date Range Filter
-                        Expanded(
+                        SizedBox(
+                          width: 200,
                           child: DropdownButtonFormField<String?>(
                             value: _filterDateRange,
                             decoration: const InputDecoration(
                               labelText: 'Date Range',
                               border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                             ),
                             items: const [
                               DropdownMenuItem<String?>(value: null, child: Text('All Dates')),

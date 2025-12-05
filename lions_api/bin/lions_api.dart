@@ -410,14 +410,34 @@ Future<Response> _eventTypes(Request req) async {
 }
 
 Future<Response> _createEvent(Request req) async {
-  stderr.writeln('🔵 POST /events');
+  stderr.writeln('🔵 POST /events - VERSION 2');
   MySQLConnection? conn;
   try {
-    final raw = await req.readAsString();
-    stderr.writeln('🔵 Request body: $raw'); // NEW: see what backend receives
-    if (raw.isEmpty) return Response(400, body: 'Missing body');
-    final bodyJson = jsonDecode(raw) as Map<String, dynamic>;
-    stderr.writeln('🔵 Parsed bodyJson keys: ${bodyJson.keys}'); // NEW
+    // Read body ONCE and store it
+    String raw;
+    try {
+      raw = await req.readAsString();
+      stderr.writeln('🔵 Body read successfully: ${raw.length} bytes');
+    } catch (e) {
+      stderr.writeln('❌ Failed to read body: $e');
+      return Response(400, body: 'Failed to read request body');
+    }
+    
+    if (raw.isEmpty) {
+      stderr.writeln('❌ Empty body');
+      return Response(400, body: 'Missing body');
+    }
+
+    // Parse JSON
+    Map<String, dynamic> bodyJson;
+    try {
+      bodyJson = jsonDecode(raw) as Map<String, dynamic>;
+      stderr.writeln('🔵 JSON parsed. Keys: ${bodyJson.keys.join(", ")}');
+    } catch (e) {
+      stderr.writeln('❌ JSON parse failed: $e');
+      stderr.writeln('Raw body was: $raw');
+      return Response(400, body: 'Invalid JSON: $e');
+    }
 
     final eventTypeId = bodyJson['event_type_id'];
     final clubId = bodyJson['lions_club_id'];
@@ -426,8 +446,13 @@ Future<Response> _createEvent(Request req) async {
     final notes = bodyJson['notes']?.toString() ?? '';
     final customRoles = (bodyJson['roles'] as List<dynamic>?)?.cast<Map<String, dynamic>>();
 
-    stderr.writeln('🔵 Extracted values: eventTypeId=$eventTypeId, clubId=$clubId, eventDate=$eventDate'); // NEW
-    stderr.writeln('🔵 customRoles length: ${customRoles?.length}'); // NEW
+    stderr.writeln('🔵 Parsed values:');
+    stderr.writeln('  - eventTypeId: $eventTypeId');
+    stderr.writeln('  - clubId: $clubId');
+    stderr.writeln('  - eventDate: $eventDate');
+    stderr.writeln('  - location: $location');
+    stderr.writeln('  - notes: $notes');
+    stderr.writeln('  - roles count: ${customRoles?.length ?? 0}');
 
     if (eventTypeId == null || clubId == null || eventDate.isEmpty) {
       return Response(400, body: 'Missing required fields: event_type_id, lions_club_id, event_date');
@@ -435,93 +460,46 @@ Future<Response> _createEvent(Request req) async {
 
     conn = await _connect();
 
-    final eventParams = {
-      'event_type_id': eventTypeId.toString(),
-      'lions_club_id': clubId.toString(),
-      'event_date': eventDate,
-      'location': location,
-      'notes': notes,
-    };
-
-    stderr.writeln('🔵 About to INSERT event with params: $eventParams'); // NEW
-
-    // Create the event
+    // Insert event
     await conn.execute('''
       INSERT INTO events (event_type_id, lions_club_id, event_date, location, notes)
       VALUES (:et, :club, :date, :loc, :notes)
-    ''', {'et': eventTypeId.toString(), 'club': clubId.toString(), 'date': eventDate, 'loc': location, 'notes': notes});
+    ''', {
+      'et': eventTypeId.toString(),
+      'club': clubId.toString(),
+      'date': eventDate,
+      'loc': location,
+      'notes': notes
+    });
 
-    stderr.writeln('🔵 Event INSERT succeeded'); // NEW
-    
     final idRes = await conn.execute('SELECT LAST_INSERT_ID() AS id');
     final newId = idRes.rows.first.assoc()['id'];
     final newEventId = int.parse(newId!);
 
-    stderr.writeln('🔵 New event ID: $newEventId'); // NEW
+    stderr.writeln('✅ Event created with ID: $newEventId');
 
-    // Insert roles (either from customRoles array or copy from templates)
+    // Insert roles
     if (customRoles != null && customRoles.isNotEmpty) {
-      // Use custom roles provided by user (already edited in UI)
-      stderr.writeln('🔵 Creating event with ${customRoles.length} custom roles');
+      stderr.writeln('🔵 Inserting ${customRoles.length} roles...');
       for (final r in customRoles) {
         final roleName = r['role_name']?.toString() ?? '';
         final timeIn = r['time_in']?.toString() ?? '';
         final timeOut = r['time_out']?.toString() ?? '';
         
-        if (roleName.isEmpty) continue; // Skip empty roles
+        if (roleName.isEmpty) continue;
 
-        stderr.writeln('🔵 Inserting role: $roleName'); // NEW
-        
-        // FIXED: Include event_type_id in role insert
         await conn.execute('''
           INSERT INTO roles (event_id, event_type_id, role_name, time_in, time_out)
           VALUES (:eid, :etid, :name, :tin, :tout)
         ''', {
           'eid': newEventId.toString(),
-          'etid': eventTypeId.toString(), // ✅ ADD THIS
+          'etid': eventTypeId.toString(),
           'name': roleName,
           'tin': timeIn,
           'tout': timeOut
         });
       }
-      
-      eventParams['roles_count'] = customRoles.length.toString();
-      stderr.writeln('✅ Created event with ${customRoles.length} custom roles');
-    } else {
-      // Fallback: Copy template roles if no custom roles provided
-      stderr.writeln('🔵 No custom roles provided, copying templates');
-      final templateRoles = await conn.execute('''
-        SELECT role_name, time_in, time_out
-        FROM roles
-        WHERE event_type_id = :eventTypeId AND event_id IS NULL
-        ORDER BY time_in, role_name
-      ''', {'eventTypeId': eventTypeId.toString()});
-
-      var copiedCount = 0;
-      for (final row in templateRoles.rows) {
-        final r = row.assoc();
-        final roleName = r['role_name']?.toString() ?? '';
-        final timeIn = r['time_in']?.toString() ?? '';
-        final timeOut = r['time_out']?.toString() ?? '';
-        
-        // FIXED: Include event_type_id
-        await conn.execute('''
-          INSERT INTO roles (event_id, event_type_id, role_name, time_in, time_out)
-          VALUES (:eventId, :eventTypeId, :roleName, :timeIn, :timeOut)
-        ''', {
-          'eventId': newEventId.toString(),
-          'eventTypeId': eventTypeId.toString(), // ✅ ADD THIS
-          'roleName': roleName,
-          'timeIn': timeIn,
-          'timeOut': timeOut,
-        });
-        copiedCount++;
-      }
-      
-      if (copiedCount > 0) {
-        eventParams['copied_template_roles'] = copiedCount.toString();
-      }
-      stderr.writeln('✅ Copied $copiedCount template roles to event $newEventId');
+      stderr.writeln('✅ Inserted ${customRoles.length} roles');
     }
 
     // Log audit
@@ -532,14 +510,23 @@ Future<Response> _createEvent(Request req) async {
       entityId: newEventId,
       action: 'CREATE',
       changedByMemberId: authMemberId,
-      newValue: eventParams,
+      newValue: {
+        'event_type_id': eventTypeId.toString(),
+        'lions_club_id': clubId.toString(),
+        'event_date': eventDate,
+        'location': location,
+        'notes': notes,
+      },
     );
 
-    final resp = {'event_id': newId.toString()};
-    stderr.writeln('✅ Event created successfully: $newEventId');
-    return Response.ok(jsonEncode(resp), headers: {'Content-Type': 'application/json'});
+    return Response.ok(
+      jsonEncode({'event_id': newId.toString()}),
+      headers: {'Content-Type': 'application/json'}
+    );
   } catch (e, st) {
-    stderr.writeln('❌ Error in _createEvent: $e\n$st');
+    stderr.writeln('❌ ERROR in _createEvent:');
+    stderr.writeln('  Exception: $e');
+    stderr.writeln('  Stack trace: $st');
     return Response.internalServerError(body: 'Error: $e');
   } finally {
     await conn?.close();
@@ -2006,10 +1993,26 @@ Future<Response> _deleteMember(Request req, String idStr) async {
   }
 }
 
+// ✅ ADD THIS FUNCTION (place it before main())
+Middleware _handleOptions = (Handler innerHandler) {
+  return (Request request) async {
+    if (request.method == 'OPTIONS') {
+      stderr.writeln('🔵 OPTIONS ${request.url.path} - returning 200');
+      return Response.ok('', headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Origin, Content-Type, X-Member-Id',
+      });
+    }
+    return innerHandler(request);
+  };
+};
+
 // ...existing code...
 void main(List<String> args) async {
   final ip = InternetAddress.anyIPv4;
   
+  // ✅ UPDATED: Handle OPTIONS requests BEFORE the router
   final handler = Pipeline()
       .addMiddleware(shelf_cors.corsHeaders(headers: {
         shelf_cors.ACCESS_CONTROL_ALLOW_ORIGIN: '*',
@@ -2017,9 +2020,11 @@ void main(List<String> args) async {
         shelf_cors.ACCESS_CONTROL_ALLOW_HEADERS: 'Origin, Content-Type, X-Member-Id',
       }))
       .addMiddleware(logRequests())
+      .addMiddleware(_handleOptions) // ✅ ADD THIS LINE
       .addHandler(_router().call);
 
   final port = int.parse(Platform.environment['PORT'] ?? '8080');
   final server = await io.serve(handler, ip, port);
   print('Server listening on port ${server.port}');
 }
+

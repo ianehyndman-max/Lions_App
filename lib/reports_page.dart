@@ -169,43 +169,54 @@ class _ReportsPageState extends State<ReportsPage> {
           children: [
             const Text('Filters', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
-            Row(
-              children: [
-                // Date Range
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _pickDateRange,
-                    icon: const Icon(Icons.date_range),
-                    label: Text(
-                      '${_startDate.toIso8601String().split('T').first} to ${_endDate.toIso8601String().split('T').first}',
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                
-                // Club Filter (super only)
-                if (_isSuper)
-                  Expanded(
-                    child: DropdownButtonFormField<int?>(
-                      value: _filterClubId,
-                      decoration: const InputDecoration(
-                        labelText: 'Club',
-                        border: OutlineInputBorder(),
+            // FIXED: Wrap Row in SingleChildScrollView for mobile
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  // Date Range
+                  SizedBox(
+                    width: 280,
+                    child: OutlinedButton.icon(
+                      onPressed: _pickDateRange,
+                      icon: const Icon(Icons.date_range),
+                      label: Text(
+                        '${_startDate.toIso8601String().split('T').first} to ${_endDate.toIso8601String().split('T').first}',
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      items: [
-                        const DropdownMenuItem<int?>(value: null, child: Text('All Clubs')),
-                        ..._clubs.map((c) => DropdownMenuItem<int?>(
-                              value: int.tryParse(c['id'].toString()),
-                              child: Text(c['name']?.toString() ?? ''),
-                            )),
-                      ],
-                      onChanged: (val) {
-                        setState(() => _filterClubId = val);
-                        _loadReports();
-                      },
                     ),
                   ),
-              ],
+                  const SizedBox(width: 16),
+                  
+                  // Club Filter (super only)
+                  if (_isSuper)
+                    SizedBox(
+                      width: 200,
+                      child: DropdownButtonFormField<int?>(
+                        value: _filterClubId,
+                        decoration: const InputDecoration(
+                          labelText: 'Club',
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        ),
+                        items: [
+                          const DropdownMenuItem<int?>(value: null, child: Text('All Clubs')),
+                          ..._clubs.map((c) => DropdownMenuItem<int?>(
+                                value: int.tryParse(c['id'].toString()),
+                                child: Text(
+                                  c['name']?.toString() ?? '',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              )),
+                        ],
+                        onChanged: (val) {
+                          setState(() => _filterClubId = val);
+                          _loadReports();
+                        },
+                      ),
+                    ),
+                ],
+              ),
             ),
           ],
         ),

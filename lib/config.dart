@@ -7,14 +7,21 @@ import 'package:flutter/foundation.dart';
 /// - Mobile/Desktop: use the developer machine IP for local testing.
 /// Change the mobileHost value when you deploy (e.g. https://api.example.com).
 String getApiBase() {
-  const mobileHost = 'http://192.168.4.39:8080';
-  const devApiHost = 'http://127.0.0.1:8080';
+  // Set to true for AWS, false for local development
+  const useAWS = true;
+  
+  const awsHost = 'http://54.79.125.34/api';
+  const localMobileHost = 'http://192.168.4.39:8080';
+  const localDevHost = 'http://127.0.0.1:8080';
+
+  if (useAWS) {
+    return awsHost;
+  }
 
   if (kIsWeb) {
-    // Always use explicit dev API host for web dev so requests go to backend not the web server.
-    return devApiHost;
+    return localDevHost;
   } else {
-    return mobileHost;
+    return localMobileHost;
   }
 }
 

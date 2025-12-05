@@ -129,22 +129,7 @@ class HomePage extends StatelessWidget {
                                 ),
                               ),
                               const SizedBox(height: 16),
-                              // NEW: Reports button
-                              /*ElevatedButton.icon(
-                                onPressed: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(builder: (_) => const ReportsPage()),
-                                  );
-                                },
-                                icon: const Icon(Icons.assessment),
-                                label: const Text('Reports'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.red,
-                                  foregroundColor: Colors.white,
-                                ),
-                              ),
-                              const SizedBox(height: 16),*/
+                              
                             ],
                           );
                         },
