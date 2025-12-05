@@ -2019,7 +2019,7 @@ void main(List<String> args) async {
         shelf_cors.ACCESS_CONTROL_ALLOW_METHODS: 'GET, POST, PUT, DELETE, OPTIONS',
         shelf_cors.ACCESS_CONTROL_ALLOW_HEADERS: 'Origin, Content-Type, X-Member-Id',
       }))
-      .addMiddleware(logRequests())
+      //.addMiddleware(logRequests())
       .addMiddleware(_handleOptions) // ✅ ADD THIS LINE
       .addHandler(_router().call);
 
