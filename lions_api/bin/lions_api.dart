@@ -1162,22 +1162,65 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
       return Response(400, body: 'No roles defined for this event yet.');
     }
 
-    final rolesHtml = StringBuffer()..write('<ul>');
+    // ✅ UPDATED: Mobile-responsive roles HTML
+    final rolesHtml = StringBuffer();
+
+    rolesHtml.write('''
+    <div style="margin: 20px 0;">
+      <!-- Desktop table (will be hidden on mobile via inline media query) -->
+      <table style="width: 100%; border-collapse: collapse; margin: 10px 0;" class="desktop-table">
+        <thead>
+          <tr>
+            <th style="background-color: #d32f2f; color: white; padding: 12px; text-align: left;">Role</th>
+            <th style="background-color: #d32f2f; color: white; padding: 12px; text-align: left;">Start</th>
+            <th style="background-color: #d32f2f; color: white; padding: 12px; text-align: left;">Finish</th>
+          </tr>
+        </thead>
+        <tbody>
+    ''');
+
     for (final row in rolesResult.rows) {
       final r = row.assoc();
-      rolesHtml.write('<li>${r['role_name']}: ${r['time_in']} - ${r['time_out']}</li>');
+      rolesHtml.write('''
+          <tr>
+            <td style="padding: 10px; border-bottom: 1px solid #ddd;">${r['role_name']}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #ddd;">${r['time_in']}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #ddd;">${r['time_out']}</td>
+          </tr>
+    ''');
     }
-    rolesHtml.write('</ul>');
 
-    
+    rolesHtml.write('''
+        </tbody>
+      </table>
+      
+      <!-- Mobile cards (will be hidden on desktop) -->
+      <div class="mobile-cards">
+    ''');
+
+    for (final row in rolesResult.rows) {
+      final r = row.assoc();
+      rolesHtml.write('''
+        <div style="background: #f5f5f5; padding: 12px; margin: 8px 0; border-radius: 5px; border-left: 4px solid #d32f2f;">
+          <div style="font-weight: bold; color: #d32f2f; margin-bottom: 4px;">${r['role_name']}</div>
+          <div style="color: #666; font-size: 14px;">${r['time_in']} - ${r['time_out']}</div>
+        </div>
+    ''');
+    }
+
+    rolesHtml.write('''
+      </div>
+    </div>
+    ''');
+
     // Build template variables
     final vars = <String, String>{
       'event_type': event['event_type']?.toString() ?? '',
-      'event_name': '${event['event_type'] ?? ''} · ${event['club_name'] ?? ''}', // keep for other templates
+      'event_name': '${event['event_type'] ?? ''} · ${event['club_name'] ?? ''}',
       'date': event['event_date']?.toString() ?? '',
-      'event_date': event['event_date']?.toString() ?? '', // add legacy alias
+      'event_date': event['event_date']?.toString() ?? '',
       'location': event['location']?.toString() ?? '',
-      'event_location': event['location']?.toString() ?? '', // add legacy alias
+      'event_location': event['location']?.toString() ?? '',
       'club_name': event['club_name']?.toString() ?? '',
       'roles_html': rolesHtml.toString(),
       'notes': event['notes']?.toString() ?? '',
