@@ -1166,14 +1166,14 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
     final rolesHtml = StringBuffer();
 
     rolesHtml.write('''
-    <div style="margin: 20px 0;">
-      <!-- Desktop table (will be hidden on mobile via inline media query) -->
-      <table style="width: 100%; border-collapse: collapse; margin: 10px 0;" class="desktop-table">
+    <div style="width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 20px 0;">
+      <table style="width: 100%; min-width: 500px; border-collapse: collapse; margin: 0;">
         <thead>
           <tr>
-            <th style="background-color: #d32f2f; color: white; padding: 12px; text-align: left;">Role</th>
-            <th style="background-color: #d32f2f; color: white; padding: 12px; text-align: left;">Start</th>
-            <th style="background-color: #d32f2f; color: white; padding: 12px; text-align: left;">Finish</th>
+            <th style="background-color: #d32f2f; color: white; padding: 12px; text-align: left; white-space: nowrap;">Role</th>
+            <th style="background-color: #d32f2f; color: white; padding: 12px; text-align: left; white-space: nowrap;">Start</th>
+            <th style="background-color: #d32f2f; color: white; padding: 12px; text-align: left; white-space: nowrap;">Finish</th>
+            <th style="background-color: #d32f2f; color: white; padding: 12px; text-align: left; white-space: nowrap;">Volunteer</th>
           </tr>
         </thead>
         <tbody>
@@ -1181,11 +1181,13 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
 
     for (final row in rolesResult.rows) {
       final r = row.assoc();
+      final volunteer = r['volunteer_name'] ?? '(Available)';
       rolesHtml.write('''
           <tr>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd;">${r['role_name']}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd;">${r['time_in']}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd;">${r['time_out']}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #ddd; white-space: nowrap;">${r['role_name']}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #ddd; white-space: nowrap;">${r['time_in']}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #ddd; white-space: nowrap;">${r['time_out']}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #ddd; white-space: nowrap;">$volunteer</td>
           </tr>
     ''');
     }
@@ -1193,23 +1195,6 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
     rolesHtml.write('''
         </tbody>
       </table>
-      
-      <!-- Mobile cards (will be hidden on desktop) -->
-      <div class="mobile-cards">
-    ''');
-
-    for (final row in rolesResult.rows) {
-      final r = row.assoc();
-      rolesHtml.write('''
-        <div style="background: #f5f5f5; padding: 12px; margin: 8px 0; border-radius: 5px; border-left: 4px solid #d32f2f;">
-          <div style="font-weight: bold; color: #d32f2f; margin-bottom: 4px;">${r['role_name']}</div>
-          <div style="color: #666; font-size: 14px;">${r['time_in']} - ${r['time_out']}</div>
-        </div>
-    ''');
-    }
-
-    rolesHtml.write('''
-      </div>
     </div>
     ''');
 

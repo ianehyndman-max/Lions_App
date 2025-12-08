@@ -10,22 +10,9 @@
   .label { font-weight: bold; color: #d32f2f; }
   .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
   
-  /* Default: show table on desktop */
-  .desktop-table { display: table; width: 100%; }
-  .mobile-cards { display: none; }
-  
-  /* Mobile: hide table, show cards */
   @media only screen and (max-width: 600px) {
-    .desktop-table { display: none !important; }
-    .mobile-cards { display: block !important; }
     .content { padding: 10px; }
     .header h1 { font-size: 20px; }
-  }
-  
-  /* Gmail Android fix - force mobile view */
-  @media screen and (max-device-width: 600px) {
-    .desktop-table { display: none !important; }
-    .mobile-cards { display: block !important; }
   }
 </style>
 </head>
