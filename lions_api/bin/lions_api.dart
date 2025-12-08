@@ -43,9 +43,13 @@ void debugDbDiagnostics({
 // ---------------- Config (env first) ----------------
 String _envOr(String key, String fallback) => Platform.environment[key] ?? fallback;
 final _dbHost = _envOr('DB_HOST', 'lions-club-db.c12ge624w2tu.ap-southeast-2.rds.amazonaws.com');
+//final _dbHost = _envOr('DB_HOST', 'localhost');
 final _dbPort = int.tryParse(Platform.environment['DB_PORT'] ?? '') ?? 3306;
 final _dbUser = _envOr('DB_USER', 'admin');
+//final _dbUser = _envOr('DB_USER', 'root');
 final _dbPass = _envOr('DB_PASS', 'ML4231LionsApp!');
+//final _dbPass = _envOr('DB_PASS', 'IanMySql1*.*');
+//final _dbName = _envOr('DB_NAME', 'lions');
 final _dbName = _envOr('DB_NAME', 'lions');
 
 
@@ -413,17 +417,24 @@ Future<Response> _createEvent(Request req) async {
   stderr.writeln('🔵 POST /events - VERSION 2');
   MySQLConnection? conn;
   try {
+    stderr.writeln('🔵 POST _createEvent try 1 #1');
     // Read body ONCE and store it
     String raw;
+    stderr.writeln('🔵 POST _createEvent try 1 #2');
     try {
+      stderr.writeln('🔵 POST _createEvent try 2 #1');
       raw = await req.readAsString();
+      stderr.writeln('🔵 POST _createEvent try 2 #2');
       stderr.writeln('🔵 Body read successfully: ${raw.length} bytes');
+      stderr.writeln('🔵 POST _createEvent try 2 #3');
     } catch (e) {
+      stderr.writeln('🔵 POST _createEvent catch 1 #1');
       stderr.writeln('❌ Failed to read body: $e');
       return Response(400, body: 'Failed to read request body');
     }
     
     if (raw.isEmpty) {
+      stderr.writeln('🔵 POST _createEvent if raw empty 1 #1');
       stderr.writeln('❌ Empty body');
       return Response(400, body: 'Missing body');
     }

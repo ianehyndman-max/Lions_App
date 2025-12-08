@@ -10,6 +10,7 @@ String getApiBase() {
   // Set to true for AWS, false for local development
   const useAWS = true;
   
+  // const awsHost = 'http://54.79.125.34:8080';  // ✅ Direct to port 8080 (bypass NGINX)
   const awsHost = 'http://54.79.125.34/api';
   const localMobileHost = 'http://192.168.4.39:8080';
   const localDevHost = 'http://127.0.0.1:8080';
