@@ -1166,36 +1166,40 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
     final rolesHtml = StringBuffer();
 
     rolesHtml.write('''
-    <div style="width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 20px 0;">
-      <table style="width: 100%; min-width: 500px; border-collapse: collapse; margin: 0;">
-        <thead>
-          <tr>
-            <th style="background-color: #d32f2f; color: white; padding: 12px; text-align: left; white-space: nowrap;">Role</th>
-            <th style="background-color: #d32f2f; color: white; padding: 12px; text-align: left; white-space: nowrap;">Start</th>
-            <th style="background-color: #d32f2f; color: white; padding: 12px; text-align: left; white-space: nowrap;">Finish</th>
-            <th style="background-color: #d32f2f; color: white; padding: 12px; text-align: left; white-space: nowrap;">Volunteer</th>
-          </tr>
-        </thead>
-        <tbody>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin: 20px 0;">
+      <tr>
+        <td style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
+          <table style="width: 100%; min-width: 500px; border-collapse: collapse;">
+            <thead>
+              <tr>
+                <th style="background-color: #d32f2f; color: white; padding: 12px; text-align: left;">Role</th>
+                <th style="background-color: #d32f2f; color: white; padding: 12px; text-align: left;">Start</th>
+                <th style="background-color: #d32f2f; color: white; padding: 12px; text-align: left;">Finish</th>
+                <th style="background-color: #d32f2f; color: white; padding: 12px; text-align: left;">Volunteer</th>
+              </tr>
+            </thead>
+            <tbody>
     ''');
 
     for (final row in rolesResult.rows) {
       final r = row.assoc();
       final volunteer = r['volunteer_name'] ?? '(Available)';
       rolesHtml.write('''
-          <tr>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd; white-space: nowrap;">${r['role_name']}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd; white-space: nowrap;">${r['time_in']}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd; white-space: nowrap;">${r['time_out']}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd; white-space: nowrap;">$volunteer</td>
-          </tr>
+              <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #ddd;">${r['role_name']}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #ddd;">${r['time_in']}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #ddd;">${r['time_out']}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #ddd;">$volunteer</td>
+              </tr>
     ''');
     }
 
     rolesHtml.write('''
-        </tbody>
-      </table>
-    </div>
+            </tbody>
+          </table>
+        </td>
+      </tr>
+    </table>
     ''');
 
     // Build template variables
