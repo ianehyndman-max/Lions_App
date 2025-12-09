@@ -12,6 +12,8 @@ import 'package:path/path.dart' as p;
 
 
 
+
+
 // ---------------- Diagnostics ----------------
 void debugDbDiagnostics({
   required String dbHost,
@@ -1545,6 +1547,183 @@ Future<Response> _deleteRole(Request req, String roleId) async {
   }
 }
 
+// ============================================================================
+// EVENT TYPE MANAGEMENT ENDPOINTS (CORRECTED)
+// ============================================================================
+
+/// POST /event_types - Create a new event type (admin/super only)
+Future<Response> _createEventType(Request req) async {
+  stderr.writeln('🔵 POST /event_types');
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) return Response(401, body: 'Unauthorized');
+    
+    conn = await _connect();
+    
+    // Check if user is admin or super
+    final isAdmin = await _isAdmin(conn, authMemberId);
+    final isSuper = await _isSuper(conn, authMemberId);
+    
+    if (!isAdmin && !isSuper) {
+      return Response(403, body: 'Admin access required');
+    }
+
+    final raw = await req.readAsString();
+    if (raw.isEmpty) return Response(400, body: 'Missing body');
+    final bodyJson = jsonDecode(raw) as Map<String, dynamic>;
+    
+    final name = bodyJson['name']?.toString().trim();
+    
+    if (name == null || name.isEmpty) {
+      return Response(400, body: 'Event type name required');
+    }
+
+    await conn.execute('INSERT INTO event_types (name) VALUES (:name)', {'name': name});
+    
+    final idRes = await conn.execute('SELECT LAST_INSERT_ID() AS id');
+    final newId = idRes.rows.first.assoc()['id'];
+    
+    // Log audit
+    await _logAudit(
+      conn,
+      entityType: 'event_type',
+      entityId: int.parse(newId!),
+      action: 'CREATE',
+      changedByMemberId: authMemberId,
+      newValue: {'name': name},
+    );
+    
+    stderr.writeln('✅ Created event type: $name (id=$newId)');
+    return Response.ok(jsonEncode({'id': newId, 'name': name}), headers: {'Content-Type': 'application/json'});
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _createEventType: $e\n$st');
+    return Response.internalServerError(body: 'Failed to create event type: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+/// PUT /event_types/:id - Update an event type (admin/super only)
+Future<Response> _updateEventType(Request req, String id) async {
+  stderr.writeln('🔵 PUT /event_types/$id');
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) return Response(401, body: 'Unauthorized');
+    
+    conn = await _connect();
+    
+    // Check if user is admin or super
+    final isAdmin = await _isAdmin(conn, authMemberId);
+    final isSuper = await _isSuper(conn, authMemberId);
+    
+    if (!isAdmin && !isSuper) {
+      return Response(403, body: 'Admin access required');
+    }
+
+    // Get old value for audit
+    final oldRow = await conn.execute('SELECT * FROM event_types WHERE id = :id', {'id': id});
+    final oldValue = oldRow.rows.isNotEmpty ? oldRow.rows.first.assoc() : null;
+
+    final raw = await req.readAsString();
+    if (raw.isEmpty) return Response(400, body: 'Missing body');
+    final bodyJson = jsonDecode(raw) as Map<String, dynamic>;
+    
+    final name = bodyJson['name']?.toString().trim();
+    
+    if (name == null || name.isEmpty) {
+      return Response(400, body: 'Event type name required');
+    }
+
+    await conn.execute('UPDATE event_types SET name = :name WHERE id = :id', {'name': name, 'id': id});
+    
+    final result = await conn.execute('SELECT * FROM event_types WHERE id = :id', {'id': id});
+    if (result.rows.isEmpty) {
+      return Response(404, body: 'Event type not found');
+    }
+    
+    // Log audit
+    await _logAudit(
+      conn,
+      entityType: 'event_type',
+      entityId: int.parse(id),
+      action: 'UPDATE',
+      changedByMemberId: authMemberId,
+      oldValue: oldValue,
+      newValue: {'name': name},
+    );
+    
+    stderr.writeln('✅ Updated event type id=$id name=$name');
+    return Response.ok(jsonEncode(result.rows.first.assoc()), headers: {'Content-Type': 'application/json'});
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _updateEventType: $e\n$st');
+    return Response.internalServerError(body: 'Failed to update event type: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+/// DELETE /event_types/:id - Delete an event type (admin/super only)
+Future<Response> _deleteEventType(Request req, String id) async {
+  stderr.writeln('🔵 DELETE /event_types/$id');
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) return Response(401, body: 'Unauthorized');
+    
+    conn = await _connect();
+    
+    // Check if user is admin or super
+    final isAdmin = await _isAdmin(conn, authMemberId);
+    final isSuper = await _isSuper(conn, authMemberId);
+    
+    if (!isAdmin && !isSuper) {
+      return Response(403, body: 'Admin access required');
+    }
+
+    // Get old value for audit
+    final oldRow = await conn.execute('SELECT * FROM event_types WHERE id = :id', {'id': id});
+    final oldValue = oldRow.rows.isNotEmpty ? oldRow.rows.first.assoc() : null;
+
+    // Check if event type is in use
+    final eventsCheck = await conn.execute(
+      'SELECT COUNT(*) as count FROM events WHERE event_type_id = :id',
+      {'id': id}
+    );
+    final countRow = eventsCheck.rows.first.assoc();
+    final count = int.tryParse(countRow['count']?.toString() ?? '0') ?? 0;
+    
+    if (count > 0) {
+      return Response(400, body: 'Cannot delete event type that is in use by $count event(s)');
+    }
+
+    // Delete associated role templates first (where event_id IS NULL)
+    await conn.execute('DELETE FROM roles WHERE event_type_id = :id AND event_id IS NULL', {'id': id});
+    
+    // Delete the event type
+    await conn.execute('DELETE FROM event_types WHERE id = :id', {'id': id});
+    
+    // Log audit
+    await _logAudit(
+      conn,
+      entityType: 'event_type',
+      entityId: int.parse(id),
+      action: 'DELETE',
+      changedByMemberId: authMemberId,
+      oldValue: oldValue,
+    );
+    
+    stderr.writeln('✅ Deleted event type id=$id');
+    return Response(204);
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _deleteEventType: $e\n$st');
+    return Response.internalServerError(body: 'Failed to delete event type: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
 // Events report - breakdown by type
 Future<Response> _reportEvents(Request req) async {
   stderr.writeln('🔵 GET /reports/events');
@@ -1809,41 +1988,59 @@ Future<Response> _reportFillRates(Request req) async {
 // ---------------- Router & Server ----------------
 Handler _router() {
   final router = Router();
+  
+  // ============ MEMBERS ROUTES ============
+  router.post('/members', _createMember);
   router.get('/members', _members);
-  router.get('/clubs', _clubs);
+  router.put('/members/<id>', (Request req, String id) => _updateMember(req, id));
+  router.delete('/members/<id>', (Request req, String id) => _deleteMember(req, id));
+  
+  // ============ CLUBS ROUTES ============
   router.post('/clubs', _createClub);
+  router.get('/clubs', _clubs);
   router.put('/clubs/<id>', (Request req, String id) => _updateClub(req, id));
   router.delete('/clubs/<id>', (Request req, String id) => _deleteClub(req, id));
-  router.get('/event_types', _eventTypes);
   
-  // THESE THREE LINES SHOULD BE HERE:
+  // ============ EVENT TYPES & ROLE TEMPLATES ROUTES ============
+  // IMPORTANT: More specific routes FIRST (with /role_templates path segment)
   router.get('/event_types/<id>/role_templates', (Request req, String id) => _getRoleTemplates(req, id));
   router.post('/event_types/<id>/role_templates', (Request req, String id) => _saveRoleTemplate(req, id));
   router.delete('/role_templates/<id>', (Request req, String id) => _deleteRoleTemplate(req, id));
   
+  // Then general event_types routes
+  router.post('/event_types', _createEventType);
+  router.get('/event_types', _eventTypes);
+  router.put('/event_types/<id>', (Request req, String id) => _updateEventType(req, id));
+  router.delete('/event_types/<id>', (Request req, String id) => _deleteEventType(req, id));
+  
+  // ============ EVENTS ROUTES ============
+  // IMPORTANT: Specific routes BEFORE parameterized routes
+  router.get('/events/calendar', _eventsCalendar); // ⬅️ MUST come before /events/<id>
   router.post('/events', _createEvent);
-  router.delete('/events/<id>', (Request req, String id) => _deleteEvent(req, id));
-  router.post('/members', _createMember);
-  router.put('/members/<id>', (Request req, String id) => _updateMember(req, id));
-  router.delete('/members/<id>', (Request req, String id) => _deleteMember(req, id));
-  router.get('/events/calendar', _eventsCalendar);
-  router.get('/events/<id>', (Request req, String id) => _eventDetails(req, id));
   router.get('/events', _events);
+  
+  // Event-specific routes (with <id> parameter)
+  router.get('/events/<id>', (Request req, String id) => _eventDetails(req, id));
   router.put('/events/<id>', (Request req, String id) => _updateEvent(req, id));
+  router.delete('/events/<id>', (Request req, String id) => _deleteEvent(req, id));
   router.post('/events/<id>/notify', (Request req, String id) => _notifyEventMembers(req, id));
   router.post('/events/<id>/volunteers', (Request req, String id) => _assignVolunteer(req, id));
+  router.post('/events/<id>/roles', (Request req, String id) => _addRoleToEvent(req, id));
+  
+  // Multi-parameter routes (most specific)
   router.delete('/events/<eventId>/volunteers/<roleId>', (Request req, String eventId, String roleId) => _unassignVolunteer(req, eventId, roleId));
   
-  // THESE THREE LINES SHOULD ALSO BE HERE (for event role management):
-  router.post('/events/<id>/roles', (Request req, String id) => _addRoleToEvent(req, id));
+  // ============ ROLES ROUTES ============
   router.put('/roles/<id>', (Request req, String id) => _updateRole(req, id));
   router.delete('/roles/<id>', (Request req, String id) => _deleteRole(req, id));
   
-  router.get('/audit_logs', _getAuditLogs);
+  // ============ REPORTS ROUTES ============
   router.get('/reports/events', _reportEvents);
   router.get('/reports/volunteers', _reportVolunteers);
   router.get('/reports/fill_rates', _reportFillRates);
   
+  // ============ AUDIT LOGS ROUTE ============
+  router.get('/audit_logs', _getAuditLogs);
   
   return router;
 }

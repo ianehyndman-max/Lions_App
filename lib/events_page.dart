@@ -8,6 +8,8 @@ import 'config.dart';
 import 'widgets/email_html_editor.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 import 'api_client.dart';
+import 'event_type_management_page.dart';
+import 'auth_store.dart';
 
 class EventsPage extends StatefulWidget {
   EventsPage({super.key});
@@ -570,6 +572,29 @@ Widget build(BuildContext context) {
       title: const Text('Events'),
       backgroundColor: Colors.red,
       actions: [
+        // NEW: Event Type Management button (admin/super only)
+        FutureBuilder<bool>(
+          future: Future.wait([AuthStore.isAdmin(), AuthStore.isSuper()])
+              .then((results) => results[0] || results[1]),
+          builder: (context, snapshot) {
+            if (snapshot.data != true) return const SizedBox.shrink();
+            return IconButton(
+              icon: const Icon(Icons.settings),
+              tooltip: 'Manage Event Types & Templates',
+              onPressed: () async {
+                final prefs = await SharedPreferences.getInstance();
+                final memberId = prefs.getInt('member_id') ?? 0;
+                if (!mounted) return;
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => EventTypeManagementPage(memberId: memberId),
+                  ),
+                );
+              },
+            );
+          },
+        ),
         IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
       ],
     ),
