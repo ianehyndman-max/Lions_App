@@ -1985,6 +1985,79 @@ Future<Response> _reportFillRates(Request req) async {
   }
 }
 
+/// GET /reports/club_comparison - Compare all clubs (super admin only)
+Future<Response> _reportClubComparison(Request req) async {
+  stderr.writeln('🔵 GET /reports/club_comparison');
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) return Response(401, body: 'Unauthorized');
+    
+    conn = await _connect();
+    
+    // Check if user is super admin
+    final isSuper = await _isSuper(conn, authMemberId);
+    if (!isSuper) {
+      return Response(403, body: 'Super admin access required');
+    }
+
+    final params = req.url.queryParameters;
+    final startDate = params['start_date'];
+    final endDate = params['end_date'];
+    final eventTypeId = params['event_type_id'];
+
+    if (startDate == null || endDate == null) {
+      return Response(400, body: 'start_date and end_date required');
+    }
+
+    var sql = '''
+      SELECT 
+        lc.id,
+        lc.name,
+        COUNT(DISTINCT e.id) as total_events,
+        COUNT(DISTINCT a.member_id) as active_members,
+        COALESCE(SUM(TIME_TO_SEC(TIMEDIFF(a.actual_time_out, a.actual_time_in)) / 3600), 0) as total_hours,
+        COALESCE(
+          SUM(CASE WHEN a.actual_time_in IS NOT NULL THEN 1 ELSE 0 END) / 
+          NULLIF(COUNT(a.id), 0),
+          0
+        ) as fill_rate
+      FROM lions_club lc
+      LEFT JOIN events e ON lc.id = e.club_id 
+        AND e.date BETWEEN :startDate AND :endDate
+    ''';
+    
+    final sqlParams = <String, dynamic>{
+      'startDate': startDate,
+      'endDate': endDate,
+    };
+
+    if (eventTypeId != null) {
+      sql += ' AND e.event_type_id = :eventTypeId';
+      sqlParams['eventTypeId'] = eventTypeId;
+    }
+
+    sql += '''
+      LEFT JOIN assignments a ON e.id = a.event_id
+      GROUP BY lc.id, lc.name
+      ORDER BY total_events DESC, total_hours DESC
+    ''';
+
+    final result = await conn.execute(sql, sqlParams);
+    final clubs = result.rows.map((r) => r.assoc()).toList();
+
+    return Response.ok(
+      jsonEncode({'clubs': clubs}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _reportClubComparison: $e\n$st');
+    return Response.internalServerError(body: 'Failed to generate report: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
 // ---------------- Router & Server ----------------
 Handler _router() {
   final router = Router();
@@ -2038,6 +2111,7 @@ Handler _router() {
   router.get('/reports/events', _reportEvents);
   router.get('/reports/volunteers', _reportVolunteers);
   router.get('/reports/fill_rates', _reportFillRates);
+  router.get('/reports/club_comparison', _reportClubComparison);
   
   // ============ AUDIT LOGS ROUTE ============
   router.get('/audit_logs', _getAuditLogs);
