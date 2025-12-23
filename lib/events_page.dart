@@ -604,72 +604,105 @@ Widget build(BuildContext context) {
             ? Center(child: Text(_error!, style: const TextStyle(color: Colors.red)))
             : Column(
                 children: [
-                  // Filter Row - FIXED FOR MOBILE
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
+                  // Filter Row - FIXED: Remove Card, add generous padding
+                  Padding(
                     padding: const EdgeInsets.all(16.0),
-                    child: Row(
-                      children: [
-                        // Event Type Filter
-                        SizedBox(
-                          width: 200,
-                          child: DropdownButtonFormField<int?>(
-                            value: _filterEventTypeId,
-                            decoration: const InputDecoration(
-                              labelText: 'Event Type',
-                              border: OutlineInputBorder(),
-                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal, // ✅ Mobile fix stays
+                      child: Row(
+                        children: [
+                          // Event Type Filter
+                          SizedBox(
+                            width: 220, // ✅ Back to comfortable width
+                            child: DropdownButtonFormField<int?>(
+                              value: _filterEventTypeId,
+                              decoration: const InputDecoration(
+                                hintText: 'Event Type',
+                                border: OutlineInputBorder(),
+                                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                              ),
+                              style: const TextStyle(
+                                color: Colors.black,
+                                decoration: TextDecoration.none,
+                                fontSize: 14,
+                              ),
+                              items: [
+                                const DropdownMenuItem<int?>(
+                                  value: null,
+                                  child: Text(
+                                    'All Types',
+                                    style: TextStyle(decoration: TextDecoration.none),
+                                  ),
+                                ),
+                                ..._eventTypes.map((et) => DropdownMenuItem<int?>(
+                                      value: _toInt(et['id']),
+                                      child: Text(
+                                        et['name']?.toString() ?? '',
+                                        style: const TextStyle(decoration: TextDecoration.none),
+                                      ),
+                                    )),
+                              ],
+                              onChanged: (val) {
+                                setState(() => _filterEventTypeId = val);
+                                _load();
+                              },
                             ),
-                            items: [
-                              const DropdownMenuItem<int?>(value: null, child: Text('All Types')),
-                              ..._eventTypes.map((et) => DropdownMenuItem<int?>(
-                                    value: _toInt(et['id']),
-                                    child: Text(et['name']?.toString() ?? ''),
-                                  )),
-                            ],
-                            onChanged: (val) {
-                              setState(() => _filterEventTypeId = val);
+                          ),
+                          const SizedBox(width: 16), // ✅ More breathing room
+                          // Date Range Filter
+                          SizedBox(
+                            width: 200, // ✅ Comfortable width
+                            child: DropdownButtonFormField<String?>(
+                              value: _filterDateRange,
+                              decoration: const InputDecoration(
+                                hintText: 'Date Range',
+                                border: OutlineInputBorder(),
+                                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                              ),
+                              style: const TextStyle(
+                                color: Colors.black,
+                                decoration: TextDecoration.none,
+                                fontSize: 14,
+                              ),
+                              items: const [
+                                DropdownMenuItem<String?>(
+                                  value: null,
+                                  child: Text('All Dates', style: TextStyle(decoration: TextDecoration.none)),
+                                ),
+                                DropdownMenuItem<String?>(
+                                  value: 'today',
+                                  child: Text('Today', style: TextStyle(decoration: TextDecoration.none)),
+                                ),
+                                DropdownMenuItem<String?>(
+                                  value: 'week',
+                                  child: Text('Next 7 Days', style: TextStyle(decoration: TextDecoration.none)),
+                                ),
+                                DropdownMenuItem<String?>(
+                                  value: 'month',
+                                  child: Text('Next 30 Days', style: TextStyle(decoration: TextDecoration.none)),
+                                ),
+                              ],
+                              onChanged: (val) {
+                                setState(() => _filterDateRange = val);
+                                _load();
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 16), // ✅ More breathing room
+                          // Clear Filters Button
+                          ElevatedButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                _filterEventTypeId = null;
+                                _filterDateRange = null;
+                              });
                               _load();
                             },
+                            icon: const Icon(Icons.clear),
+                            label: const Text('Clear'),
                           ),
-                        ),
-                        const SizedBox(width: 16),
-                        // Date Range Filter
-                        SizedBox(
-                          width: 200,
-                          child: DropdownButtonFormField<String?>(
-                            value: _filterDateRange,
-                            decoration: const InputDecoration(
-                              labelText: 'Date Range',
-                              border: OutlineInputBorder(),
-                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            ),
-                            items: const [
-                              DropdownMenuItem<String?>(value: null, child: Text('All Dates')),
-                              DropdownMenuItem<String?>(value: 'today', child: Text('Today')),
-                              DropdownMenuItem<String?>(value: 'week', child: Text('Next 7 Days')),
-                              DropdownMenuItem<String?>(value: 'month', child: Text('Next 30 Days')),
-                            ],
-                            onChanged: (val) {
-                              setState(() => _filterDateRange = val);
-                              _load();
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        // Clear Filters Button
-                        ElevatedButton.icon(
-                          onPressed: () {
-                            setState(() {
-                              _filterEventTypeId = null;
-                              _filterDateRange = null;
-                            });
-                            _load();
-                          },
-                          icon: const Icon(Icons.clear),
-                          label: const Text('Clear'),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                   // Table

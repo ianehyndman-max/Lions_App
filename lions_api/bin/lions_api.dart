@@ -44,13 +44,13 @@ void debugDbDiagnostics({
 
 // ---------------- Config (env first) ----------------
 String _envOr(String key, String fallback) => Platform.environment[key] ?? fallback;
-final _dbHost = _envOr('DB_HOST', 'lions-club-db.c12ge624w2tu.ap-southeast-2.rds.amazonaws.com');
-//final _dbHost = _envOr('DB_HOST', 'localhost');
+//final _dbHost = _envOr('DB_HOST', 'lions-club-db.c12ge624w2tu.ap-southeast-2.rds.amazonaws.com');
+final _dbHost = _envOr('DB_HOST', 'localhost');
 final _dbPort = int.tryParse(Platform.environment['DB_PORT'] ?? '') ?? 3306;
-final _dbUser = _envOr('DB_USER', 'admin');
-//final _dbUser = _envOr('DB_USER', 'root');
-final _dbPass = _envOr('DB_PASS', 'ML4231LionsApp!');
-//final _dbPass = _envOr('DB_PASS', 'IanMySql1*.*');
+//final _dbUser = _envOr('DB_USER', 'admin');
+final _dbUser = _envOr('DB_USER', 'root');
+//final _dbPass = _envOr('DB_PASS', 'ML4231LionsApp!');
+final _dbPass = _envOr('DB_PASS', 'IanMySql1*.*');
 //final _dbName = _envOr('DB_NAME', 'lions');
 final _dbName = _envOr('DB_NAME', 'lions');
 
@@ -1142,22 +1142,15 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
     final clubId = event['lions_club_id'];
     final isOther = (event['event_type'] ?? '').toString() == 'Other';
 
-    // roles listing
-    final rolesQuery = isOther
-        ? '''
-          SELECT r.role_name, r.time_in, r.time_out
-          FROM roles r
-          WHERE r.event_id = :eventId
-          ORDER BY r.time_in, r.role_name
-        '''
-        : '''
-          SELECT r.role_name, r.time_in, r.time_out
-          FROM roles r
-          JOIN events e ON e.id = :eventId
-          WHERE (r.event_id IS NULL AND r.event_type_id = e.event_type_id)
-            AND (r.event_id IS NULL)
-          ORDER BY r.time_in, r.role_name
-        ''';
+    // roles listing with volunteer names
+    final rolesQuery = '''
+      SELECT r.role_name, r.time_in, r.time_out, m.name AS volunteer_name
+      FROM roles r
+      LEFT JOIN event_volunteers ev ON ev.role_id = r.id AND ev.event_id = :eventId
+      LEFT JOIN members m ON m.id = ev.member_id
+      WHERE r.event_id = :eventId
+      ORDER BY r.time_in, r.role_name
+    ''';
     final rolesResult = await conn.execute(rolesQuery, {'eventId': eventId});
 
     if (!dryRun && isOther && rolesResult.rows.isEmpty) {
@@ -1185,7 +1178,10 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
 
     for (final row in rolesResult.rows) {
       final r = row.assoc();
-      final volunteer = r['volunteer_name'] ?? '(Available)';
+      final volunteerName = r['volunteer_name']?.toString() ?? '';
+      final hasVolunteer = volunteerName.trim().isNotEmpty;
+      
+      final volunteer = hasVolunteer ? volunteerName : '(Available)';
       rolesHtml.write('''
               <tr>
                 <td style="padding: 10px; border-bottom: 1px solid #ddd;">${r['role_name']}</td>
@@ -1218,8 +1214,12 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
     };
 
     // Choose templates
-    final subjectTemplateFile = resendUnfilled ? 'resend_unfilled_subject.txt' : 'new_event_subject.txt';
-    final bodyTemplateFile = resendUnfilled ? 'resend_unfilled_body.html' : 'new_event_body.html';
+    final subjectTemplateFile = onlyAssigned
+        ? 'assigned_reminder_subject.txt'
+        : (resendUnfilled ? 'resend_unfilled_subject.txt' : 'new_event_subject.txt');
+    final bodyTemplateFile = onlyAssigned
+        ? 'assigned_reminder_body.html'
+        : (resendUnfilled ? 'resend_unfilled_body.html' : 'new_event_body.html');
 
     final subject = overrideSubject ?? await _renderTemplate(subjectTemplateFile, vars);
     final bodyHtml = overrideBodyHtml ?? await _renderTemplate(bodyTemplateFile, vars);

@@ -210,9 +210,7 @@ class HomePage extends StatelessWidget {
           );
         }
 
-        return Scaffold(
-          appBar: AppBar(title: const Text('Lions Club'), backgroundColor: Colors.red),
-            body: GridView.builder(
+        return GridView.builder(
             padding: const EdgeInsets.all(16),
             itemCount: items.length,
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -235,8 +233,7 @@ class HomePage extends StatelessWidget {
                 ),
               );
             },
-          ),
-        );
+          );
       },
     );
   }

@@ -8,7 +8,7 @@ import 'package:flutter/foundation.dart';
 /// Change the mobileHost value when you deploy (e.g. https://api.example.com).
 String getApiBase() {
   // Set to true for AWS, false for local development
-  const useAWS = true;
+  const useAWS = false;
   
   // const awsHost = 'http://54.79.125.34:8080';  // ✅ Direct to port 8080 (bypass NGINX)
   const awsHost = 'http://54.79.125.34/api';

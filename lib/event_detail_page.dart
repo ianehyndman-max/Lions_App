@@ -49,6 +49,20 @@ class _EventDetailPageState extends State<EventDetailPage> {
   bool get _hasUnassigned =>
       _roles.any((r) => (r['volunteer_name']?.toString().trim().isEmpty ?? true));
 
+  bool get _isPastEvent {
+    if (_event == null) return false;
+    final dateStr = _event!['date']?.toString() ?? '';
+    if (dateStr.isEmpty) return false;
+    try {
+      final eventDate = DateTime.parse(dateStr);
+      final today = DateTime.now();
+      // Compare only dates (ignore time)
+      return eventDate.isBefore(DateTime(today.year, today.month, today.day));
+    } catch (e) {
+      return false;
+    }
+  }
+
   int get _assignedCount =>
       _roles.where((r) => (r['volunteer_name']?.toString().trim().isNotEmpty ?? false)).length;
   int get _unassignedCount => _roles.length - _assignedCount;
@@ -591,6 +605,11 @@ class _EventDetailPageState extends State<EventDetailPage> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please set up your profile first')));
       return;
     }
+    // Prevent non-admins from volunteering for past events
+    if (!_isAdmin && _isPastEvent) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cannot volunteer for past events')));
+      return;
+    }
     final currentMemberId = role['member_id'];
     if (currentMemberId != null && currentMemberId.toString().isNotEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('This slot is already taken')));
@@ -926,10 +945,12 @@ class _EventDetailPageState extends State<EventDetailPage> {
                                                     )
                                                   : hasVolunteer
                                                       ? const SizedBox.shrink()
-                                                      : TextButton(
-                                                          onPressed: () => _volunteerSelf(r),
-                                                          child: const Text('Volunteer'),
-                                                        ),
+                                                      : _isPastEvent
+                                                          ? const SizedBox.shrink()
+                                                          : TextButton(
+                                                              onPressed: () => _volunteerSelf(r),
+                                                              child: const Text('Volunteer'),
+                                                            ),
                                           if (_isAdmin && _isOther)
                                             IconButton(
                                               tooltip: 'Delete role',
