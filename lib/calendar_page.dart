@@ -7,6 +7,7 @@ import 'create_event_dialog.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'config.dart';
 import 'api_client.dart';
+import 'auth_store.dart';
 
 class CalendarPage extends StatefulWidget {
   const CalendarPage({super.key});
@@ -115,8 +116,9 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   Future<void> _loadAdminFlag() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() => _isAdmin = prefs.getBool('is_admin') ?? false);
+    final isAdmin = await AuthStore.isAdmin();
+    final isSuper = await AuthStore.isSuper();
+    setState(() => _isAdmin = isAdmin || isSuper);
   }
 
   Future<void> _sendEventEmailsFromCalendar(String eventId) async {
@@ -173,11 +175,12 @@ class _CalendarPageState extends State<CalendarPage> {
             icon: const Icon(Icons.refresh),
             onPressed: _fetchEvents,
           ),
-          IconButton(
-            tooltip: 'Add Event',
-            icon: const Icon(Icons.add),
-            onPressed: () => _openCreateEventDialogFromCalendar(_selectedDay ?? DateTime.now()), // <-- fix
-          ),
+          if (_isAdmin)
+            IconButton(
+              tooltip: 'Add Event',
+              icon: const Icon(Icons.add),
+              onPressed: () => _openCreateEventDialogFromCalendar(_selectedDay ?? DateTime.now()),
+            ),
         ],
       ),
       body: _isLoading

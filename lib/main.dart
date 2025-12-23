@@ -153,39 +153,49 @@ class HomePage extends StatelessWidget {
                   );
                 },
               ),
-              ElevatedButton(
-                onPressed: () async {
-                  final prefs = await SharedPreferences.getInstance();
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'member_id: ${prefs.getInt('member_id')}\n'
-                          'club_id: ${prefs.getInt('club_id')}\n'
-                          'is_admin: ${prefs.getBool('is_admin')}\n'
-                          'is_super: ${prefs.getBool('is_super')}',
-                          maxLines: 5,
-                        ),
-                        duration: const Duration(seconds: 5),
+              FutureBuilder<bool>(
+                future: AuthStore.isSuper(),
+                builder: (context, snapshot) {
+                  if (snapshot.data != true) return const SizedBox.shrink();
+                  return Column(
+                    children: [
+                      ElevatedButton(
+                        onPressed: () async {
+                          final prefs = await SharedPreferences.getInstance();
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'member_id: ${prefs.getInt('member_id')}\n'
+                                  'club_id: ${prefs.getInt('club_id')}\n'
+                                  'is_admin: ${prefs.getBool('is_admin')}\n'
+                                  'is_super: ${prefs.getBool('is_super')}',
+                                  maxLines: 5,
+                                ),
+                                duration: const Duration(seconds: 5),
+                              ),
+                            );
+                          }
+                        },
+                        child: const Text('Debug: Show Profile'),
                       ),
-                    );
-                  }
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+                        onPressed: () async {
+                          final prefs = await SharedPreferences.getInstance();
+                          await prefs.clear();
+                          if (context.mounted) {
+                            Navigator.of(context).pushReplacement(
+                              MaterialPageRoute(builder: (_) => OnboardingPage()),
+                            );
+                          }
+                        },
+                        child: const Text('Reset Profile (Debug)'),
+                      ),
+                    ],
+                  );
                 },
-                child: const Text('Debug: Show Profile'),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
-                onPressed: () async {
-                  final prefs = await SharedPreferences.getInstance();
-                  await prefs.clear();
-                  if (context.mounted) {
-                    Navigator.of(context).pushReplacement(
-                      MaterialPageRoute(builder: (_) => OnboardingPage()),
-                    );
-                  }
-                },
-                child: const Text('Reset Profile (Debug)'),
               ),
             ],
           ),
