@@ -199,6 +199,7 @@ class _MembersPageState extends State<MembersPage> {
 }
 
   Future<void> _openCreateMemberDialog() async {
+    debugPrint('=== DEBUG: _openCreateMemberDialog called ===');
     if (!_isAdmin) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Admin access required')),
@@ -211,26 +212,43 @@ class _MembersPageState extends State<MembersPage> {
       final res = await http.get(Uri.parse('$apiBase/clubs'));
        if (res.statusCode == 200) {
          clubs = json.decode(res.body) as List;
+         debugPrint('DEBUG: Loaded ${clubs.length} clubs');
        }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('ERROR: Failed to load clubs: $e');
+    }
 
     final isSuper = await AuthStore.isSuper();
     final nameCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
+    debugPrint('DEBUG: isSuper=$isSuper, _userClubId=$_userClubId');
 
     // Default to user's club if set
     int? selectedClubId;
     if (!isSuper && _userClubId != null) {
       selectedClubId = _userClubId;
+      debugPrint('DEBUG: Admin creating member - preset club to $_userClubId');
+      // Verify the club exists in the loaded clubs list
+      final clubExists = clubs.any((c) => _toInt(c['id']) == selectedClubId);
+      if (!clubExists) {
+        debugPrint('WARNING: Admin\'s club ID $_userClubId not found in clubs list!');
+        selectedClubId = null;
+      }
     } else if (clubs.isNotEmpty) {
       selectedClubId = _toInt(clubs.first['id']);
     }
+    debugPrint('DEBUG: selectedClubId initialized to: $selectedClubId, isSuper: $isSuper');
 
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDlg) => AlertDialog(
+        builder: (ctx, setDlg) {
+          // Add listeners to text controllers to trigger rebuilds
+          nameCtrl.removeListener(() {});  // Remove any existing listeners first
+          nameCtrl.addListener(() => setDlg(() {}));
+          
+          return AlertDialog(
           title: const Text('Add Member'),
           content: SizedBox(
             width: 420,
@@ -264,13 +282,24 @@ class _MembersPageState extends State<MembersPage> {
                       })
                       .where((e) => e.value != null)
                       .toList(),
-                  onChanged: isSuper ? (v) => setDlg(() => selectedClubId = v) : null,  // Lock for non-super users
+                  onChanged: isSuper ? (v) {
+                    setDlg(() => selectedClubId = v);
+                    debugPrint('DEBUG: Club changed to: $v');
+                  } : null,  // Lock for non-super users
                   decoration: InputDecoration(
                     labelText: 'Club',
                     suffixIcon: isSuper ? null : const Icon(Icons.lock, size: 16),
                     helperText: isSuper ? null : 'Locked to your club',
                   ),
                 ),
+                if (selectedClubId != null && !isSuper)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8.0),
+                    child: Text(
+                      'Selected: ${clubs.firstWhere((c) => _toInt(c['id']) == selectedClubId, orElse: () => {})['name'] ?? "Unknown"}',
+                      style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -282,11 +311,15 @@ class _MembersPageState extends State<MembersPage> {
             FilledButton(
               onPressed: (nameCtrl.text.trim().isEmpty || selectedClubId == null)
                   ? null
-                  : () => Navigator.pop(ctx, true),
+                  : () {
+                      debugPrint('DEBUG: Create button pressed - selectedClubId=$selectedClubId');
+                      Navigator.pop(ctx, true);
+                    },
               child: const Text('Create'),
             ),
           ],
-        ),
+        );
+        },
       ),
     );
 
@@ -315,7 +348,9 @@ class _MembersPageState extends State<MembersPage> {
   }
 
   Future<void> _openEditMemberDialog(dynamic member) async {
+    debugPrint('=== DEBUG: _openEditMemberDialog called for member: ${member['id']} - ${member['name']} ===');
     if (!_isAdmin) {
+      debugPrint('DEBUG: Edit blocked - user is not admin');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Admin access required')),
       );
@@ -326,7 +361,7 @@ class _MembersPageState extends State<MembersPage> {
 
     List<dynamic> clubs = [];
     try {
-      final res = await http.get(Uri.parse('http://localhost:8080/clubs'));
+      final res = await http.get(Uri.parse('$apiBase/clubs'));
       if (res.statusCode == 200) {
         clubs = json.decode(res.body) as List;
       }
@@ -575,7 +610,10 @@ class _MembersPageState extends State<MembersPage> {
                                         IconButton(
                                           tooltip: 'Edit',
                                           icon: const Icon(Icons.edit, size: 20),
-                                          onPressed: () => _openEditMemberDialog(m),
+                                          onPressed: () {
+                                            debugPrint('DEBUG: Edit button clicked for member ${m['id']}');
+                                            _openEditMemberDialog(m);
+                                          },
                                         ),
                                         IconButton(
                                           tooltip: 'Delete',
