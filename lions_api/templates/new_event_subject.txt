@@ -1,1 +1,1 @@
-🦁 New Mudgeeraba Lions Club Event
+🦁 New {{club_name}} Lions Club Event

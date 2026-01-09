@@ -1,1 +1,1 @@
-🦁 We still need you for our Lions Club Event
+🦁 We still need you for our {{club_name}} Lions Club Event

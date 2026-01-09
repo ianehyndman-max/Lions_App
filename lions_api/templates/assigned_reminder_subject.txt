@@ -1,1 +1,1 @@
-🦁 Your Mudgeeraba Lions Club Event Reminder
+🦁 Your {{club_name}} Lions Club Event Reminder
