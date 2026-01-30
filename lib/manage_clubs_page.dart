@@ -65,18 +65,58 @@ class _ManageClubsPageState extends State<ManageClubsPage> {
 
   Future<void> _createClub() async {
     final nameCtrl = TextEditingController();
+    final emailSubdomainCtrl = TextEditingController();
+    final replyToEmailCtrl = TextEditingController();
+    final fromNameCtrl = TextEditingController();
 
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Create New Club'),
-        content: TextField(
-          controller: nameCtrl,
-          decoration: const InputDecoration(
-            labelText: 'Club Name',
-            hintText: 'e.g., Mudgeeraba Lions Club',
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Club Name *',
+                  hintText: 'e.g., Mudgeeraba Lions Club',
+                ),
+                autofocus: true,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: emailSubdomainCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Email Subdomain',
+                  hintText: 'e.g., mudgeeraba',
+                  helperText: 'Emails will be sent from: noreply@subdomain.thelionsapp.com',
+                  helperMaxLines: 2,
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: replyToEmailCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Reply-To Email',
+                  hintText: 'e.g., secretary@mudgeerabalions.org.au',
+                  helperText: 'Club\'s actual email address for replies',
+                  helperMaxLines: 2,
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: fromNameCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'From Name',
+                  hintText: 'e.g., Mudgeeraba Lions Club',
+                  helperText: 'Display name shown to recipients',
+                  helperMaxLines: 2,
+                ),
+              ),
+            ],
           ),
-          autofocus: true,
         ),
         actions: [
           TextButton(
@@ -94,7 +134,12 @@ class _ManageClubsPageState extends State<ManageClubsPage> {
     if (ok != true || nameCtrl.text.trim().isEmpty) return;
 
     try {
-      final res = await ApiClient.post('/clubs', body: {'name': nameCtrl.text.trim()});
+      final res = await ApiClient.post('/clubs', body: {
+        'name': nameCtrl.text.trim(),
+        'email_subdomain': emailSubdomainCtrl.text.trim(),
+        'reply_to_email': replyToEmailCtrl.text.trim(),
+        'from_name': fromNameCtrl.text.trim(),
+      });
       
       if (!mounted) return;
 
@@ -118,15 +163,57 @@ class _ManageClubsPageState extends State<ManageClubsPage> {
 
   Future<void> _editClub(Map<String, dynamic> club) async {
     final nameCtrl = TextEditingController(text: club['name']?.toString() ?? '');
+    final emailSubdomainCtrl = TextEditingController(text: club['email_subdomain']?.toString() ?? '');
+    final replyToEmailCtrl = TextEditingController(text: club['reply_to_email']?.toString() ?? '');
+    final fromNameCtrl = TextEditingController(text: club['from_name']?.toString() ?? '');
 
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Edit Club'),
-        content: TextField(
-          controller: nameCtrl,
-          decoration: const InputDecoration(labelText: 'Club Name'),
-          autofocus: true,
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Club Name *',
+                ),
+                autofocus: true,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: emailSubdomainCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Email Subdomain',
+                  hintText: 'e.g., mudgeeraba',
+                  helperText: 'Emails will be sent from: noreply@subdomain.thelionsapp.com',
+                  helperMaxLines: 2,
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: replyToEmailCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Reply-To Email',
+                  hintText: 'e.g., secretary@mudgeerabalions.org.au',
+                  helperText: 'Club\'s actual email address for replies',
+                  helperMaxLines: 2,
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: fromNameCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'From Name',
+                  hintText: 'e.g., Mudgeeraba Lions Club',
+                  helperText: 'Display name shown to recipients',
+                  helperMaxLines: 2,
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -144,7 +231,12 @@ class _ManageClubsPageState extends State<ManageClubsPage> {
     if (ok != true || nameCtrl.text.trim().isEmpty) return;
 
     try {
-      final res = await ApiClient.put('/clubs/${club['id']}', body: {'name': nameCtrl.text.trim()});
+      final res = await ApiClient.put('/clubs/${club['id']}', body: {
+        'name': nameCtrl.text.trim(),
+        'email_subdomain': emailSubdomainCtrl.text.trim(),
+        'reply_to_email': replyToEmailCtrl.text.trim(),
+        'from_name': fromNameCtrl.text.trim(),
+      });
       
       if (!mounted) return;
 
@@ -249,19 +341,39 @@ class _ManageClubsPageState extends State<ManageClubsPage> {
                         final club = _clubs[index] as Map<String, dynamic>;
                         final clubId = int.tryParse(club['id']?.toString() ?? '');
                         final clubName = club['name']?.toString() ?? 'Unnamed Club';
+                        final emailSubdomain = club['email_subdomain']?.toString();
+                        final hasEmailConfig = emailSubdomain != null && emailSubdomain.isNotEmpty;
 
                         return Card(
                           margin: const EdgeInsets.only(bottom: 8),
                           child: ListTile(
-                            leading: const CircleAvatar(
-                              backgroundColor: Colors.red,
-                              child: Icon(Icons.groups, color: Colors.white),
+                            leading: CircleAvatar(
+                              backgroundColor: hasEmailConfig ? Colors.green : Colors.red,
+                              child: Icon(
+                                hasEmailConfig ? Icons.email : Icons.groups, 
+                                color: Colors.white,
+                              ),
                             ),
                             title: Text(
                               clubName,
                               style: const TextStyle(fontWeight: FontWeight.bold),
                             ),
-                            subtitle: Text('ID: ${club['id']}'),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('ID: ${club['id']}'),
+                                if (hasEmailConfig)
+                                  Text(
+                                    'Email: noreply@$emailSubdomain.thelionsapp.com',
+                                    style: const TextStyle(fontSize: 12, color: Colors.green),
+                                  )
+                                else
+                                  const Text(
+                                    'Email not configured',
+                                    style: TextStyle(fontSize: 12, color: Colors.orange),
+                                  ),
+                              ],
+                            ),
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [

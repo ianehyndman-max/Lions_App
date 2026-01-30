@@ -110,6 +110,9 @@ Future<void> _sendEmail({
   required String to,
   required String subject,
   required String bodyHtml,
+  String? fromAddress,
+  String? fromName,
+  String? replyToEmail,
 }) async {
   if (_smtpUser.isEmpty || _smtpPass.isEmpty) {
     throw StateError('SMTP credentials missing. Set SMTP_USER and SMTP_PASS in environment.');
@@ -117,14 +120,23 @@ Future<void> _sendEmail({
 
   final smtpServer = gmail(_smtpUser, _smtpPass);
 
+  // Use provided from address or fall back to SMTP user
+  final emailFrom = fromAddress ?? _smtpUser;
+  final nameFrom = fromName ?? 'Lions Club';
+
   final message = Message()
-    ..from = Address(_smtpUser, 'Lions Club')
+    ..from = Address(emailFrom, nameFrom)
     ..recipients.add(to)
     ..subject = subject
     ..html = bodyHtml;
 
+  // Add Reply-To header if club has a reply email
+  if (replyToEmail != null && replyToEmail.isNotEmpty) {
+    message.headers['Reply-To'] = replyToEmail;
+  }
+
   await send(message, smtpServer);
-  stderr.writeln('✉️ Email queued/sent to $to');
+  stderr.writeln('✉️ Email sent to $to from $emailFrom (reply-to: ${replyToEmail ?? "none"})');
 }
 
 // ---------------- Template loader ----------------
@@ -915,13 +927,16 @@ Future<Response> _clubs(Request req) async {
   MySQLConnection? conn;
   try {
     conn = await _connect();
-    final result = await conn.execute('SELECT id, name FROM lions_club ORDER BY name');
+    final result = await conn.execute('SELECT id, name, email_subdomain, reply_to_email, from_name FROM lions_club ORDER BY name');
     final list = <Map<String, dynamic>>[];
     for (final row in result.rows) {
       final a = row.assoc();
       list.add({
         'id': a['id'],
         'name': a['name'],
+        'email_subdomain': a['email_subdomain'],
+        'reply_to_email': a['reply_to_email'],
+        'from_name': a['from_name'],
       });
     }
     return Response.ok(jsonEncode(list), headers: {'Content-Type': 'application/json'});
@@ -956,14 +971,31 @@ Future<Response> _createClub(Request req) async {
 
     final name = (bodyJson['name'] ?? '').toString().trim();
     if (name.isEmpty) return Response(400, body: 'Club name required');
+    
+    final emailSubdomain = (bodyJson['email_subdomain'] ?? '').toString().trim();
+    final replyToEmail = (bodyJson['reply_to_email'] ?? '').toString().trim();
+    final fromName = (bodyJson['from_name'] ?? '').toString().trim();
 
-    await conn.execute('INSERT INTO lions_club (name) VALUES (:n)', {'n': name});
+    await conn.execute('''
+      INSERT INTO lions_club (name, email_subdomain, reply_to_email, from_name)
+      VALUES (:name, :subdomain, :replyTo, :fromName)
+    ''', {
+      'name': name,
+      'subdomain': emailSubdomain.isEmpty ? null : emailSubdomain,
+      'replyTo': replyToEmail.isEmpty ? null : replyToEmail,
+      'fromName': fromName.isEmpty ? null : fromName,
+    });
     final idRes = await conn.execute('SELECT LAST_INSERT_ID() AS id');
     final newId = idRes.rows.first.assoc()['id'];
 
     stderr.writeln('✅ Created club: $name (id=$newId)');
-    return Response.ok(jsonEncode({'id': newId.toString(), 'name': name}), 
-                      headers: {'Content-Type': 'application/json'});
+    return Response.ok(jsonEncode({
+      'id': newId.toString(),
+      'name': name,
+      'email_subdomain': emailSubdomain.isEmpty ? null : emailSubdomain,
+      'reply_to_email': replyToEmail.isEmpty ? null : replyToEmail,
+      'from_name': fromName.isEmpty ? null : fromName,
+    }), headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ Error in _createClub: $e\n$st');
     return Response.internalServerError(body: 'Error: $e');
@@ -993,8 +1025,25 @@ Future<Response> _updateClub(Request req, String id) async {
 
     final name = (bodyJson['name'] ?? '').toString().trim();
     if (name.isEmpty) return Response(400, body: 'Club name required');
+    
+    final emailSubdomain = (bodyJson['email_subdomain'] ?? '').toString().trim();
+    final replyToEmail = (bodyJson['reply_to_email'] ?? '').toString().trim();
+    final fromName = (bodyJson['from_name'] ?? '').toString().trim();
 
-    await conn.execute('UPDATE lions_club SET name = :name WHERE id = :id', {'name': name, 'id': id});
+    await conn.execute('''
+      UPDATE lions_club 
+      SET name = :name,
+          email_subdomain = :subdomain,
+          reply_to_email = :replyTo,
+          from_name = :fromName
+      WHERE id = :id
+    ''', {
+      'name': name,
+      'subdomain': emailSubdomain.isEmpty ? null : emailSubdomain,
+      'replyTo': replyToEmail.isEmpty ? null : replyToEmail,
+      'fromName': fromName.isEmpty ? null : fromName,
+      'id': id,
+    });
 
     stderr.writeln('✅ Updated club id=$id name=$name');
     return Response.ok(jsonEncode({'success': true}), headers: {'Content-Type': 'application/json'});
@@ -1129,7 +1178,8 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
     conn = await _connect();
 
     final eventResult = await conn.execute('''
-      SELECT e.id, et.name AS event_type, lc.name AS club_name, e.event_date, e.location, e.notes, e.lions_club_id
+      SELECT e.id, et.name AS event_type, lc.name AS club_name, e.event_date, e.location, e.notes, e.lions_club_id,
+             lc.email_subdomain, lc.reply_to_email, lc.from_name
       FROM events e
       LEFT JOIN event_types et ON e.event_type_id = et.id
       LEFT JOIN lions_club lc ON lc.id = e.lions_club_id
@@ -1140,6 +1190,17 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
     final event = eventResult.rows.first.assoc();
     final clubId = event['lions_club_id'];
     final isOther = (event['event_type'] ?? '').toString() == 'Other';
+    
+    // Get club email settings
+    final emailSubdomain = event['email_subdomain']?.toString();
+    final replyToEmail = event['reply_to_email']?.toString();
+    final fromName = event['from_name']?.toString() ?? event['club_name']?.toString() ?? 'Lions Club';
+    
+    // Build from address: noreply@subdomain.thelionsapp.com or fall back to default
+    String? fromAddress;
+    if (emailSubdomain != null && emailSubdomain.isNotEmpty) {
+      fromAddress = 'noreply@$emailSubdomain.thelionsapp.com';
+    }
 
     // roles listing with volunteer names
     final rolesQuery = '''
@@ -1264,7 +1325,14 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
     final failures = <String>[];
     for (final to in recipients) {
       try {
-        await _sendEmail(to: to, subject: subject, bodyHtml: bodyHtml);
+        await _sendEmail(
+          to: to,
+          subject: subject,
+          bodyHtml: bodyHtml,
+          fromAddress: fromAddress,
+          fromName: fromName,
+          replyToEmail: replyToEmail,
+        );
       } catch (e) {
         stderr.writeln('ERROR: send to $to -> $e');
         failures.add('$to: $e');
