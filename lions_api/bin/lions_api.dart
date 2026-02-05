@@ -44,13 +44,13 @@ void debugDbDiagnostics({
 
 // ---------------- Config (env first) ----------------
 String _envOr(String key, String fallback) => Platform.environment[key] ?? fallback;
-final _dbHost = _envOr('DB_HOST', 'lions-club-db.c12ge624w2tu.ap-southeast-2.rds.amazonaws.com');
-//final _dbHost = _envOr('DB_HOST', 'localhost');
+//final _dbHost = _envOr('DB_HOST', 'lions-club-db.c12ge624w2tu.ap-southeast-2.rds.amazonaws.com');
+final _dbHost = _envOr('DB_HOST', 'localhost');
 final _dbPort = int.tryParse(Platform.environment['DB_PORT'] ?? '') ?? 3306;
-final _dbUser = _envOr('DB_USER', 'admin');
-//final _dbUser = _envOr('DB_USER', 'root');
-final _dbPass = _envOr('DB_PASS', 'ML4231LionsApp!');
-//final _dbPass = _envOr('DB_PASS', 'IanMySql1*.*');
+//final _dbUser = _envOr('DB_USER', 'admin');
+final _dbUser = _envOr('DB_USER', 'root');
+//final _dbPass = _envOr('DB_PASS', 'ML4231LionsApp!');
+final _dbPass = _envOr('DB_PASS', 'IanMySql1*.*');
 final _dbName = _envOr('DB_NAME', 'lions');
 
 
@@ -118,7 +118,15 @@ Future<void> _sendEmail({
     throw StateError('SMTP credentials missing. Set SMTP_USER and SMTP_PASS in environment.');
   }
 
-  final smtpServer = gmail(_smtpUser, _smtpPass);
+  // AWS SES SMTP Configuration (Sydney region)
+  final smtpServer = SmtpServer(
+    'email-smtp.ap-southeast-2.amazonaws.com',
+    port: 587,
+    username: _smtpUser,
+    password: _smtpPass,
+    ssl: false,
+    allowInsecure: false,
+  );
 
   // Use provided from address or fall back to SMTP user
   final emailFrom = fromAddress ?? _smtpUser;
