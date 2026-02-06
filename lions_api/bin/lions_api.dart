@@ -118,14 +118,15 @@ Future<void> _sendEmail({
     throw StateError('SMTP credentials missing. Set SMTP_USER and SMTP_PASS in environment.');
   }
 
-  // AWS SES SMTP Configuration (Sydney region)
+  // Brevo SMTP Configuration
   final smtpServer = SmtpServer(
-    'email-smtp.ap-southeast-2.amazonaws.com',
+    'smtp-relay.brevo.com',
     port: 587,
     username: _smtpUser,
     password: _smtpPass,
     ssl: false,
-    allowInsecure: false,
+    allowInsecure: true,  // Required for Windows certificate validation
+    ignoreBadCertificate: true,
   );
 
   // Use provided from address or fall back to SMTP user
@@ -143,8 +144,10 @@ Future<void> _sendEmail({
     message.headers['Reply-To'] = replyToEmail;
   }
 
-  await send(message, smtpServer);
+  stderr.writeln('📤 Attempting to send email to $to from $emailFrom via ${smtpServer.host}:${smtpServer.port}');
+  final sendReport = await send(message, smtpServer);
   stderr.writeln('✉️ Email sent to $to from $emailFrom (reply-to: ${replyToEmail ?? "none"})');
+  stderr.writeln('📊 Send report: ${sendReport.toString()}');
 }
 
 // ---------------- Template loader ----------------
@@ -1204,11 +1207,9 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
     final replyToEmail = event['reply_to_email']?.toString();
     final fromName = event['from_name']?.toString() ?? event['club_name']?.toString() ?? 'Lions Club';
     
-    // Build from address: noreply@subdomain.thelionsapp.com or fall back to default
-    String? fromAddress;
-    if (emailSubdomain != null && emailSubdomain.isNotEmpty) {
-      fromAddress = 'noreply@$emailSubdomain.thelionsapp.com';
-    }
+    // Use a single verified sender (noreply@thelionsapp.com) for all clubs
+    // Club personalization goes in the From Name, replies go to club's Reply-To
+    const fromAddress = 'noreply@thelionsapp.com';
 
     // roles listing with volunteer names
     final rolesQuery = '''
