@@ -7,18 +7,19 @@ import 'package:mysql_client/mysql_client.dart';
 // Same config as your lions_api.dart
 String _envOr(String key, String fallback) => Platform.environment[key] ?? fallback;
 
-// TEMPORARILY USING LOCALHOST - change back to AWS RDS for production
-final _dbHost = _envOr('DB_HOST', 'localhost');
-// final _dbHost = _envOr('DB_HOST', 'lions-club-db.c12ge624w2tu.ap-southeast-2.rds.amazonaws.com');
+// AWS RDS (default). Uncomment localhost for local migration.
+final _dbHost = _envOr('DB_HOST', 'lions-club-db.c12ge624w2tu.ap-southeast-2.rds.amazonaws.com');
+// final _dbHost = _envOr('DB_HOST', 'localhost');
 final _dbPort = int.tryParse(Platform.environment['DB_PORT'] ?? '') ?? 3306;
-final _dbUser = _envOr('DB_USER', 'root');
-// final _dbUser = _envOr('DB_USER', 'admin');
-final _dbPass = _envOr('DB_PASS', 'IanMySql1*.*');
-// final _dbPass = _envOr('DB_PASS', 'ML4231LionsApp!');
+final _dbUser = _envOr('DB_USER', 'admin');
+// final _dbUser = _envOr('DB_USER', 'root');
+final _dbPass = _envOr('DB_PASS', 'ML4231LionsApp!');
+// final _dbPass = _envOr('DB_PASS', 'IanMySql1*.*');
 final _dbName = _envOr('DB_NAME', 'lions');
 
 void main() async {
   print('🔄 Connecting to database...');
+  print('DEBUG: resolved DB config -> host=$_dbHost port=$_dbPort user=$_dbUser db=$_dbName');
   
   final conn = await MySQLConnection.createConnection(
     host: _dbHost,
