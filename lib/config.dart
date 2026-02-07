@@ -8,7 +8,7 @@ import 'package:flutter/foundation.dart';
 /// Change the mobileHost value when you deploy (e.g. https://api.example.com).
 String getApiBase() {
   // Set to true for AWS, false for local development
-  const useAWS = false;
+  const useAWS = true;
   
   const awsHost = 'https://api.thelionsapp.com';
   const localMobileHost = 'http://192.168.4.39:8080';
