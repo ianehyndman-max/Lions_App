@@ -46,8 +46,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
     return t == 'Other' || idStr == '4';
   }
 
-  bool get _hasUnassigned =>
-      _roles.any((r) => (r['volunteer_name']?.toString().trim().isEmpty ?? true));
+  bool get _hasUnassigned => _roles.any(
+    (r) => (r['volunteer_name']?.toString().trim().isEmpty ?? true),
+  );
 
   bool get _isPastEvent {
     if (_event == null) return false;
@@ -63,8 +64,11 @@ class _EventDetailPageState extends State<EventDetailPage> {
     }
   }
 
-  int get _assignedCount =>
-      _roles.where((r) => (r['volunteer_name']?.toString().trim().isNotEmpty ?? false)).length;
+  int get _assignedCount => _roles
+      .where(
+        (r) => (r['volunteer_name']?.toString().trim().isNotEmpty ?? false),
+      )
+      .length;
   int get _unassignedCount => _roles.length - _assignedCount;
 
   @override
@@ -86,18 +90,25 @@ class _EventDetailPageState extends State<EventDetailPage> {
 
     http.Response res;
     try {
-      debugPrint('DEBUG: EventDetailPage _showEmailPreview -> $apiBase/events/${widget.eventId}/notify');
+      debugPrint(
+        'DEBUG: EventDetailPage _showEmailPreview -> $apiBase/events/${widget.eventId}/notify',
+      );
       res = await http.post(
         Uri.parse('$apiBase/events/${widget.eventId}/notify'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode(flags),
       );
-      debugPrint('DEBUG: EventDetailPage _showEmailPreview status=${res.statusCode} body=${res.body}');
+      debugPrint(
+        'DEBUG: EventDetailPage _showEmailPreview status=${res.statusCode} body=${res.body}',
+      );
     } catch (e) {
       if (!mounted) return null;
       await showDialog(
         context: context,
-        builder: (_) => AlertDialog(title: const Text('Preview failed'), content: Text('Network error: $e')),
+        builder: (_) => AlertDialog(
+          title: const Text('Preview failed'),
+          content: Text('Network error: $e'),
+        ),
       );
       return null;
     }
@@ -105,13 +116,18 @@ class _EventDetailPageState extends State<EventDetailPage> {
       if (!mounted) return null;
       await showDialog(
         context: context,
-        builder: (_) => AlertDialog(title: const Text('Preview failed'), content: Text(res.body)),
+        builder: (_) => AlertDialog(
+          title: const Text('Preview failed'),
+          content: Text(res.body),
+        ),
       );
       return null;
     }
 
     final data = json.decode(res.body) as Map<String, dynamic>;
-    final subjectCtrl = TextEditingController(text: (data['subject'] ?? '').toString());
+    final subjectCtrl = TextEditingController(
+      text: (data['subject'] ?? '').toString(),
+    );
     String bodyHtml = (data['body_html'] ?? '').toString();
     final recipients = data['recipients']?.toString() ?? '';
 
@@ -154,22 +170,37 @@ class _EventDetailPageState extends State<EventDetailPage> {
                     children: [
                       Align(
                         alignment: Alignment.centerLeft,
-                        child: Text('Recipients: $recipients', style: const TextStyle(color: Colors.grey)),
+                        child: Text(
+                          'Recipients: $recipients',
+                          style: const TextStyle(color: Colors.grey),
+                        ),
                       ),
                       const SizedBox(height: 8),
-                      TextField(controller: subjectCtrl, decoration: const InputDecoration(labelText: 'Subject')),
+                      TextField(
+                        controller: subjectCtrl,
+                        decoration: const InputDecoration(labelText: 'Subject'),
+                      ),
                       const SizedBox(height: 12),
                       TabBar(
-                        tabs: const [Tab(text: 'Preview'), Tab(text: 'Edit')],
+                        tabs: const [
+                          Tab(text: 'Preview'),
+                          Tab(text: 'Edit'),
+                        ],
                         onTap: (i) async {
                           if (i == 1 && !showEditor) {
-                            Future.delayed(const Duration(milliseconds: 10), () {
-                              setDialogState(() => showEditor = true);
-                            });
+                            Future.delayed(
+                              const Duration(milliseconds: 10),
+                              () {
+                                setDialogState(() => showEditor = true);
+                              },
+                            );
                           }
                           if (i == 0) {
                             final edited = (await editorCtrl.getHtml()).trim();
-                            final merged = _mergeIntoBody(bodyHtml, edited.isEmpty ? editableHtml : edited);
+                            final merged = _mergeIntoBody(
+                              bodyHtml,
+                              edited.isEmpty ? editableHtml : edited,
+                            );
                             setDialogState(() => previewHtml = merged);
                           }
                         },
@@ -180,12 +211,16 @@ class _EventDetailPageState extends State<EventDetailPage> {
                           children: [
                             Padding(
                               padding: const EdgeInsets.all(8),
-                              child: SingleChildScrollView(child: HtmlWidget(previewHtml)),
+                              child: SingleChildScrollView(
+                                child: HtmlWidget(previewHtml),
+                              ),
                             ),
                             Builder(
                               builder: (_) {
                                 if (!showEditor) {
-                                  return const Center(child: CircularProgressIndicator());
+                                  return const Center(
+                                    child: CircularProgressIndicator(),
+                                  );
                                 }
                                 return EmailHtmlEditor(
                                   controller: editorCtrl,
@@ -201,8 +236,14 @@ class _EventDetailPageState extends State<EventDetailPage> {
                 ),
               ),
               actions: [
-                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Send')),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Send'),
+                ),
               ],
             ),
           ),
@@ -212,11 +253,11 @@ class _EventDetailPageState extends State<EventDetailPage> {
 
     if (ok == true) {
       final editedHtml = (await editorCtrl.getHtml()).trim();
-      final mergedHtml = _mergeIntoBody(bodyHtml, editedHtml.isEmpty ? editableHtml : editedHtml);
-      return {
-        'subject': subjectCtrl.text.trim(),
-        'body_html': mergedHtml,
-      };
+      final mergedHtml = _mergeIntoBody(
+        bodyHtml,
+        editedHtml.isEmpty ? editableHtml : editedHtml,
+      );
+      return {'subject': subjectCtrl.text.trim(), 'body_html': mergedHtml};
     }
     return null;
   }
@@ -245,8 +286,11 @@ class _EventDetailPageState extends State<EventDetailPage> {
 
     // common wrapped form <ul><li>{{roles_html}}</li></ul>
     out = out.replaceAll(
-      RegExp(r'<ul[^>]*>\s*<li[^>]*>\s*{{\s*roles_html\s*}}\s*</li>\s*</ul>',
-          caseSensitive: false, dotAll: true),
+      RegExp(
+        r'<ul[^>]*>\s*<li[^>]*>\s*{{\s*roles_html\s*}}\s*</li>\s*</ul>',
+        caseSensitive: false,
+        dotAll: true,
+      ),
       rolesTable,
     );
 
@@ -335,9 +379,18 @@ class _EventDetailPageState extends State<EventDetailPage> {
   String _sanitizeFragment(String html) {
     return html
         .replaceAll(RegExp(r'<!DOCTYPE[^>]*>', caseSensitive: false), '')
-        .replaceAll(RegExp(r'</?(html|head|body)[^>]*>', caseSensitive: false), '')
-        .replaceAll(RegExp(r'<script[^>]*>[\s\S]*?</script>', caseSensitive: false), '')
-        .replaceAll(RegExp(r'<style[^>]*>[\s\S]*?</style>', caseSensitive: false), '')
+        .replaceAll(
+          RegExp(r'</?(html|head|body)[^>]*>', caseSensitive: false),
+          '',
+        )
+        .replaceAll(
+          RegExp(r'<script[^>]*>[\s\S]*?</script>', caseSensitive: false),
+          '',
+        )
+        .replaceAll(
+          RegExp(r'<style[^>]*>[\s\S]*?</style>', caseSensitive: false),
+          '',
+        )
         .trim();
   }
 
@@ -349,7 +402,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
       if (openEnd >= 0) {
         final bodyClose = lower.indexOf('</body>', openEnd + 1);
         if (bodyClose > openEnd) {
-          return original.substring(0, openEnd + 1) + fragment + original.substring(bodyClose);
+          return original.substring(0, openEnd + 1) +
+              fragment +
+              original.substring(bodyClose);
         }
       }
     }
@@ -379,11 +434,17 @@ class _EventDetailPageState extends State<EventDetailPage> {
     });
     debugPrint('DEBUG: EventDetailPage _load eventId=${widget.eventId}');
     try {
-      final res = await http.get(Uri.parse('$apiBase/events/${widget.eventId}'));
-      debugPrint('DEBUG: EventDetail GET /events/${widget.eventId} status=${res.statusCode} body=${res.body}');
+      final res = await http.get(
+        Uri.parse('$apiBase/events/${widget.eventId}'),
+      );
+      debugPrint(
+        'DEBUG: EventDetail GET /events/${widget.eventId} status=${res.statusCode} body=${res.body}',
+      );
       if (res.statusCode == 200) {
         final data = json.decode(res.body) as Map<String, dynamic>;
-        debugPrint('DEBUG: EventDetail parsed payload keys=${data.keys.toList()} rolesPresent=${data.containsKey("roles")}');
+        debugPrint(
+          'DEBUG: EventDetail parsed payload keys=${data.keys.toList()} rolesPresent=${data.containsKey("roles")}',
+        );
         _event = data['event'] as Map<String, dynamic>;
         _roles = data['roles'] as List<dynamic>;
         _notesController.text = _event!['notes']?.toString() ?? '';
@@ -414,59 +475,72 @@ class _EventDetailPageState extends State<EventDetailPage> {
 
   // Unified send flow: mode = 'new' | 'resend' | 'assigned'
   Future<void> _sendEmailFlow(String mode) async {
-   // Build preview (dry_run) and allow edit
-   final draft = await _showEmailPreview(mode: mode);
-   if (draft == null || !mounted) return;
-   final sendingLabel = switch (mode) {
-     'new' => 'Sending new event email...',
-     'resend' => 'Sending email to all...',
-     'assigned' => 'Sending reminder to assigned volunteers...',
-     _ => 'Sending email...',
-   };
-   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(sendingLabel)));
-   final payload = <String, dynamic>{
-     'subject': draft['subject'],
-     'body_html': draft['body_html'],
-   };
-   if (mode == 'resend') payload['resend_unfilled'] = true;
-   if (mode == 'assigned') payload['only_assigned'] = true;
+    // Build preview (dry_run) and allow edit
+    final draft = await _showEmailPreview(mode: mode);
+    if (draft == null || !mounted) return;
+    final sendingLabel = switch (mode) {
+      'new' => 'Sending new event email...',
+      'resend' => 'Sending email to all...',
+      'assigned' => 'Sending reminder to assigned volunteers...',
+      _ => 'Sending email...',
+    };
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(sendingLabel)));
+    final payload = <String, dynamic>{
+      'subject': draft['subject'],
+      'body_html': draft['body_html'],
+    };
+    if (mode == 'resend') payload['resend_unfilled'] = true;
+    if (mode == 'assigned') payload['only_assigned'] = true;
 
-   try {
-     debugPrint('DEBUG: EventDetailPage _sendEmailFlow($mode) POST $apiBase/events/${widget.eventId}/notify payload=${payload.keys}');
-     final res = await http.post(
-       Uri.parse('$apiBase/events/${widget.eventId}/notify'),
-       headers: {'Content-Type': 'application/json'},
-       body: json.encode(payload),
-     );
-     if (!mounted) return;
-     ScaffoldMessenger.of(context).clearSnackBars();
-     final successMsg = switch (mode) {
-       'new' => 'New event email sent.',
-       'resend' => 'Email sent to all members.',
-       'assigned' => 'Reminder sent to assigned volunteers.',
-       _ => 'Email sent.',
-     };
-     if (res.statusCode == 200) {
-       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(successMsg)));
-     } else {
-       await showDialog(
-         context: context,
-         builder: (_) => AlertDialog(
-           title: const Text('Send failed'),
-           content: Text('Status: ${res.statusCode}\n\n${res.body}'),
-           actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
-         ),
-       );
-       ScaffoldMessenger.of(context).showSnackBar(
-         SnackBar(content: Text('Failed (${res.statusCode}): ${res.body}')),
-       );
-     }
-   } catch (e) {
-     if (!mounted) return;
-     ScaffoldMessenger.of(context).clearSnackBars();
-     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-   }
-  } 
+    try {
+      debugPrint(
+        'DEBUG: EventDetailPage _sendEmailFlow($mode) POST $apiBase/events/${widget.eventId}/notify payload=${payload.keys}',
+      );
+      final res = await http.post(
+        Uri.parse('$apiBase/events/${widget.eventId}/notify'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(payload),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).clearSnackBars();
+      final successMsg = switch (mode) {
+        'new' => 'New event email sent.',
+        'resend' => 'Email sent to all members.',
+        'assigned' => 'Reminder sent to assigned volunteers.',
+        _ => 'Email sent.',
+      };
+      if (res.statusCode == 200) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(successMsg)));
+      } else {
+        await showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Send failed'),
+            content: Text('Status: ${res.statusCode}\n\n${res.body}'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed (${res.statusCode}): ${res.body}')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+  }
 
   Future<void> _sendResendToAll() async => _sendEmailFlow('resend');
 
@@ -487,19 +561,47 @@ class _EventDetailPageState extends State<EventDetailPage> {
             children: [
               pw.Text(
                 '${_event!['event_type']} - ${_event!['club_name']}',
-                style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
+                style: pw.TextStyle(
+                  fontSize: 24,
+                  fontWeight: pw.FontWeight.bold,
+                ),
               ),
               pw.SizedBox(height: 20),
-              pw.Text('Date: ${_event!['date'] ?? ''}', style: const pw.TextStyle(fontSize: 14)),
-              pw.Text('Location: ${_event!['location'] ?? ''}', style: const pw.TextStyle(fontSize: 14)),
+              pw.Text(
+                'Date: ${_event!['date'] ?? ''}',
+                style: const pw.TextStyle(fontSize: 14),
+              ),
+              pw.Text(
+                'Location: ${_event!['location'] ?? ''}',
+                style: const pw.TextStyle(fontSize: 14),
+              ),
               pw.SizedBox(height: 20),
-              pw.Text('Volunteer Roles', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
+              pw.Text(
+                'Volunteer Roles',
+                style: pw.TextStyle(
+                  fontSize: 18,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
               pw.SizedBox(height: 10),
               pw.TableHelper.fromTextArray(
-                headers: ['Role', 'Time In', 'Time Out', 'Volunteer', 'Signature'],
+                headers: [
+                  'Role',
+                  'Time In',
+                  'Time Out',
+                  'Volunteer',
+                  'Signature',
+                ],
                 data: _roles.map((r) {
-                  final volunteer = r['volunteer_name']?.toString() ?? 'Unassigned';
-                  return [r['role_name'] ?? '', r['time_in'] ?? '', r['time_out'] ?? '', volunteer, ''];
+                  final volunteer =
+                      r['volunteer_name']?.toString() ?? 'Unassigned';
+                  return [
+                    r['role_name'] ?? '',
+                    r['time_in'] ?? '',
+                    r['time_out'] ?? '',
+                    volunteer,
+                    '',
+                  ];
                 }).toList(),
                 headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
                 cellAlignment: pw.Alignment.centerLeft,
@@ -514,7 +616,13 @@ class _EventDetailPageState extends State<EventDetailPage> {
               ),
               pw.SizedBox(height: 20),
               if (_event!['notes']?.toString().isNotEmpty ?? false) ...[
-                pw.Text('Notes', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
+                pw.Text(
+                  'Notes',
+                  style: pw.TextStyle(
+                    fontSize: 18,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
                 pw.SizedBox(height: 10),
                 pw.Container(
                   padding: const pw.EdgeInsets.all(10),
@@ -528,117 +636,155 @@ class _EventDetailPageState extends State<EventDetailPage> {
       ),
     );
 
-    await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf.save());
+    await Printing.layoutPdf(
+      onLayout: (PdfPageFormat format) async => pdf.save(),
+    );
   }
 
   Future<void> _saveNotes() async {
-  if (_event == null) return;
-  setState(() => _loading = true);
-  try {
-    final eventTypeId =
-        _event!['event_type_id'] is int ? _event!['event_type_id'] : int.parse(_event!['event_type_id'].toString());
-    final clubId = _event!['club_id'] is int ? _event!['club_id'] : int.parse(_event!['club_id'].toString());
+    if (_event == null) return;
+    setState(() => _loading = true);
+    try {
+      final eventTypeId = _event!['event_type_id'] is int
+          ? _event!['event_type_id']
+          : int.parse(_event!['event_type_id'].toString());
+      final clubId = _event!['club_id'] is int
+          ? _event!['club_id']
+          : int.parse(_event!['club_id'].toString());
 
-    // Get member ID for authentication
-    final prefs = await SharedPreferences.getInstance();
-    final memberId = prefs.getInt('member_id');
-    
-    // NEW: Debug logging
-    debugPrint('🔵 memberId from prefs: $memberId');
-    debugPrint('🔵 _userMemberId from state: $_userMemberId');
+      // Get member ID for authentication
+      final prefs = await SharedPreferences.getInstance();
+      final memberId = prefs.getInt('member_id');
 
-    // Use _userMemberId from state if SharedPreferences is null
-    final authMemberId = memberId ?? _userMemberId;
-    
-    debugPrint('🔵 Using authMemberId: $authMemberId');
+      // NEW: Debug logging
+      debugPrint('🔵 memberId from prefs: $memberId');
+      debugPrint('🔵 _userMemberId from state: $_userMemberId');
 
-    if (authMemberId == null) {
-      setState(() => _loading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Not authenticated. Please log in again.')),
+      // Use _userMemberId from state if SharedPreferences is null
+      final authMemberId = memberId ?? _userMemberId;
+
+      debugPrint('🔵 Using authMemberId: $authMemberId');
+
+      if (authMemberId == null) {
+        setState(() => _loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Not authenticated. Please log in again.'),
+          ),
+        );
+        return;
+      }
+
+      debugPrint(
+        'DEBUG: EventDetailPage _saveNotes -> PUT $apiBase/events/${widget.eventId}',
       );
-      return;
-    }
+      final res = await http.put(
+        Uri.parse('$apiBase/events/${widget.eventId}'),
+        headers: {
+          'Content-Type': 'application/json',
+          'x-member-id': authMemberId.toString(),
+        },
+        body: json.encode({
+          'event_type_id': eventTypeId,
+          'lions_club_id': clubId,
+          'event_date': _event!['date'],
+          'location': _event!['location'] ?? '',
+          'notes': _notesController.text,
+        }),
+      );
 
-    debugPrint('DEBUG: EventDetailPage _saveNotes -> PUT $apiBase/events/${widget.eventId}');
-    final res = await http.put(
-      Uri.parse('$apiBase/events/${widget.eventId}'),
-      headers: {
-        'Content-Type': 'application/json',
-        'x-member-id': authMemberId.toString(),
-      },
-      body: json.encode({
-        'event_type_id': eventTypeId,
-        'lions_club_id': clubId,
-        'event_date': _event!['date'],
-        'location': _event!['location'] ?? '',
-        'notes': _notesController.text,
-      }),
-    );
-    
-    debugPrint('🔵 Response status: ${res.statusCode}');
-    debugPrint('🔵 Response body: ${res.body}');
-    
-    if (!mounted) return;
-    if (res.statusCode == 200) {
-      setState(() {
-        _isEditingNotes = false;
-        _event!['notes'] = _notesController.text;
-        _loading = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Notes saved')));
-      await _load();
-    } else {
+      debugPrint('🔵 Response status: ${res.statusCode}');
+      debugPrint('🔵 Response body: ${res.body}');
+
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        setState(() {
+          _isEditingNotes = false;
+          _event!['notes'] = _notesController.text;
+          _loading = false;
+        });
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Notes saved')));
+        await _load();
+      } else {
+        setState(() => _loading = false);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed: ${res.body}')));
+      }
+    } catch (e) {
       setState(() => _loading = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: ${res.body}')));
-    }
-  } catch (e) {
-    setState(() => _loading = false);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
     }
   }
-}
 
   Future<void> _volunteerSelf(Map<String, dynamic> role) async {
     if (_userMemberId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please set up your profile first')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please set up your profile first')),
+      );
       return;
     }
     // Prevent non-admins from volunteering for past events
     if (!_isAdmin && _isPastEvent) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cannot volunteer for past events')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot volunteer for past events')),
+      );
       return;
     }
     final currentMemberId = role['member_id'];
     if (currentMemberId != null && currentMemberId.toString().isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('This slot is already taken')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This slot is already taken')),
+      );
       return;
     }
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Volunteer for this role?'),
-        content: Text('Role: ${role['role_name']}\n${role['time_in']} - ${role['time_out']}'),
+        content: Text(
+          'Role: ${role['role_name']}\n${role['time_in']} - ${role['time_out']}',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Sign Up')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Sign Up'),
+          ),
         ],
       ),
     );
     if (ok != true) return;
-    debugPrint('DEBUG: EventDetailPage _volunteerSelf -> POST $apiBase/events/${widget.eventId}/volunteer');
+    debugPrint(
+      'DEBUG: EventDetailPage _volunteerSelf -> POST $apiBase/events/${widget.eventId}/volunteer',
+    );
     final post = await http.post(
       Uri.parse('$apiBase/events/${widget.eventId}/volunteers'),
       headers: {'Content-Type': 'application/json'},
-      body: json.encode({'role_id': role['role_id'], 'member_id': _userMemberId}),
+      body: json.encode({
+        'role_id': role['role_id'],
+        'member_id': _userMemberId,
+      }),
     );
     if (!mounted) return;
     if (post.statusCode == 200) {
       await _load();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('You are signed up!')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('You are signed up!')));
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: ${post.body}')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed: ${post.body}')));
     }
   }
 
@@ -651,32 +797,50 @@ class _EventDetailPageState extends State<EventDetailPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('We understand that circumstances change!', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text(
+              'We understand that circumstances change!',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 16),
-            const Text('To withdraw from your volunteer commitment, please contact the club secretary:'),
-            const SizedBox(height: 16),]
+            const Text(
+              'To withdraw from your volunteer commitment, please contact the club secretary:',
+            ),
+            const SizedBox(height: 16),
+          ],
         ),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
   }
 
   Future<void> _pickVolunteer(Map<String, dynamic> role) async {
     if (!_isAdmin) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Admin access required')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Admin access required')));
       return;
     }
     if (_event == null) return;
     final clubId = _event!['club_id'];
-    debugPrint('DEBUG: EventDetailPage _pickVolunteer -> GET $apiBase/members?club_id=$clubId');
+    debugPrint(
+      'DEBUG: EventDetailPage _pickVolunteer -> GET $apiBase/members?club_id=$clubId',
+    );
     final res = await http.get(Uri.parse('$apiBase/members?club_id=$clubId'));
     if (res.statusCode != 200) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to load members')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Failed to load members')));
       }
       return;
     }
-    final members = (json.decode(res.body) as List).cast<Map<String, dynamic>>();
+    final members = (json.decode(res.body) as List)
+        .cast<Map<String, dynamic>>();
     dynamic selectedMemberId = role['member_id'];
     if (!mounted) return;
     final choice = await showDialog<dynamic>(
@@ -699,7 +863,8 @@ class _EventDetailPageState extends State<EventDetailPage> {
                         value: null,
                         groupValue: selectedMemberId,
                         title: const Text('Clear assignment'),
-                        onChanged: (v) => setDialogState(() => selectedMemberId = v),
+                        onChanged: (v) =>
+                            setDialogState(() => selectedMemberId = v),
                       ),
                       ...members.map(
                         (m) => RadioListTile<dynamic>(
@@ -707,7 +872,8 @@ class _EventDetailPageState extends State<EventDetailPage> {
                           groupValue: selectedMemberId,
                           title: Text(m['name'] ?? ''),
                           subtitle: Text(m['email'] ?? ''),
-                          onChanged: (v) => setDialogState(() => selectedMemberId = v),
+                          onChanged: (v) =>
+                              setDialogState(() => selectedMemberId = v),
                         ),
                       ),
                     ],
@@ -717,14 +883,23 @@ class _EventDetailPageState extends State<EventDetailPage> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, selectedMemberId), child: const Text('Save')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, selectedMemberId),
+              child: const Text('Save'),
+            ),
           ],
         ),
       ),
     );
-    if (choice == null && role['member_id'] != null) return;
-    debugPrint('DEBUG: EventDetailPage _pickVolunteer -> POST $apiBase/events/${widget.eventId}/volunteer');
+    // Allow null to clear assignment - don't return early
+    // If user canceled the dialog, they didn't change the selection, so it's the same value (no-op)
+    debugPrint(
+      'DEBUG: EventDetailPage _pickVolunteer -> POST $apiBase/events/${widget.eventId}/volunteer',
+    );
     final post = await http.post(
       Uri.parse('$apiBase/events/${widget.eventId}/volunteers'),
       headers: {'Content-Type': 'application/json'},
@@ -733,9 +908,13 @@ class _EventDetailPageState extends State<EventDetailPage> {
     if (!mounted) return;
     if (post.statusCode == 200) {
       await _load();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Saved')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Saved')));
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: ${post.body}')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed: ${post.body}')));
     }
   }
 
@@ -753,14 +932,33 @@ class _EventDetailPageState extends State<EventDetailPage> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Role name')),
-            TextField(controller: timeInCtrl, decoration: const InputDecoration(labelText: 'Time in (e.g. 08:00)')),
-            TextField(controller: timeOutCtrl, decoration: const InputDecoration(labelText: 'Time out (e.g. 12:00)')),
+            TextField(
+              controller: nameCtrl,
+              decoration: const InputDecoration(labelText: 'Role name'),
+            ),
+            TextField(
+              controller: timeInCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Time in (e.g. 08:00)',
+              ),
+            ),
+            TextField(
+              controller: timeOutCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Time out (e.g. 12:00)',
+              ),
+            ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Add')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Add'),
+          ),
         ],
       ),
     );
@@ -769,7 +967,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
     final roleName = nameCtrl.text.trim();
     if (roleName.isEmpty) return;
 
-    debugPrint('DEBUG: EventDetailPage _addRole -> POST $apiBase/events/${widget.eventId}/roles');
+    debugPrint(
+      'DEBUG: EventDetailPage _addRole -> POST $apiBase/events/${widget.eventId}/roles',
+    );
     final res = await http.post(
       Uri.parse('$apiBase/events/${widget.eventId}/roles'),
       headers: {'Content-Type': 'application/json'},
@@ -783,9 +983,13 @@ class _EventDetailPageState extends State<EventDetailPage> {
     if (!mounted) return;
     if (res.statusCode == 201 || res.statusCode == 200) {
       await _load();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Role added')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Role added')));
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: ${res.body}')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed: ${res.body}')));
     }
   }
 
@@ -796,24 +1000,41 @@ class _EventDetailPageState extends State<EventDetailPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Role?'),
-        content: const Text('This will remove the role and any volunteer assignment for this event.'),
+        content: const Text(
+          'This will remove the role and any volunteer assignment for this event.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(style: FilledButton.styleFrom(backgroundColor: Colors.red), onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
 
     if (ok != true) return;
 
-    debugPrint('DEBUG: EventDetailPage _deleteRole -> DELETE $apiBase/events/${widget.eventId}/roles/$roleId');
-    final res = await http.delete(Uri.parse('$apiBase/events/${widget.eventId}/roles/$roleId'));
+    debugPrint(
+      'DEBUG: EventDetailPage _deleteRole -> DELETE $apiBase/events/${widget.eventId}/roles/$roleId',
+    );
+    final res = await http.delete(
+      Uri.parse('$apiBase/events/${widget.eventId}/roles/$roleId'),
+    );
     if (!mounted) return;
     if (res.statusCode == 200 || res.statusCode == 204) {
       await _load();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Role deleted')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Role deleted')));
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: ${res.body}')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed: ${res.body}')));
     }
   }
 
@@ -822,7 +1043,11 @@ class _EventDetailPageState extends State<EventDetailPage> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: Text(_event == null ? 'Event' : '${_event!['event_type']} · ${_event!['club_name']}'),
+        title: Text(
+          _event == null
+              ? 'Event'
+              : '${_event!['event_type']} · ${_event!['club_name']}',
+        ),
         backgroundColor: Colors.red,
         actions: [
           if (_event != null)
@@ -848,7 +1073,11 @@ class _EventDetailPageState extends State<EventDetailPage> {
                   value: 'assigned',
                   child: Row(
                     children: [
-                      Icon(Icons.mark_email_unread_outlined, size: 20, color: Colors.blue),
+                      Icon(
+                        Icons.mark_email_unread_outlined,
+                        size: 20,
+                        color: Colors.blue,
+                      ),
                       SizedBox(width: 12),
                       Text('Email Assigned'),
                     ],
@@ -860,183 +1089,244 @@ class _EventDetailPageState extends State<EventDetailPage> {
                     children: [
                       Icon(Icons.outgoing_mail, size: 20, color: Colors.grey),
                       SizedBox(width: 12),
-                      Text(_hasUnassigned ? 'Resend (unfilled)' : 'Resend to All'),
+                      Text(
+                        _hasUnassigned ? 'Resend (unfilled)' : 'Resend to All',
+                      ),
                     ],
                   ),
                 ),
               ],
             ),
         ],
-      ),  
-       
+      ),
+
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(child: Text(_error!, style: const TextStyle(color: Colors.red)))
-              : _event == null
-                  ? const Center(child: Text('Event not found'))
-                  : Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: ListView(
+          ? Center(
+              child: Text(_error!, style: const TextStyle(color: Colors.red)),
+            )
+          : _event == null
+          ? const Center(child: Text('Event not found'))
+          : Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: ListView(
+                children: [
+                  Card(
+                    elevation: 0,
+                    color: Colors.red.shade50,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Card(
-                            elevation: 0,
-                            color: Colors.red.shade50,
-                            child: Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(_event!['event_type'] ?? '', style: theme.textTheme.titleLarge),
-                                  const SizedBox(height: 8),
-                                  Text('Club: ${_event!['club_name'] ?? ''}'),
-                                  Text('Date: ${_event!['date'] ?? ''}'),
-                                  Text('Location: ${_event!['location'] ?? ''}'),
-                                ],
-                              ),
-                            ),
+                          Text(
+                            _event!['event_type'] ?? '',
+                            style: theme.textTheme.titleLarge,
                           ),
-                          const SizedBox(height: 16),
-                          SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: DataTable(
-                              headingRowColor: MaterialStateProperty.all(Colors.red.shade100),
-                              border: TableBorder.all(color: Colors.grey.shade300),
-                              columns: const [
-                                DataColumn(label: Text('Role', style: TextStyle(fontWeight: FontWeight.bold))),
-                                DataColumn(label: Text('Time In', style: TextStyle(fontWeight: FontWeight.bold))),
-                                DataColumn(label: Text('Time Out', style: TextStyle(fontWeight: FontWeight.bold))),
-                                DataColumn(label: Text('Volunteer', style: TextStyle(fontWeight: FontWeight.bold))),
-                                DataColumn(label: Text('Action', style: TextStyle(fontWeight: FontWeight.bold))),
-                              ],
-                              rows: _roles.map((r) {
-                                final volunteer = r['volunteer_name'] ?? '';
-                                final hasVolunteer = volunteer.toString().isNotEmpty;
-                                final currentMemberId = r['member_id'];
-                                final isCurrentUser = _userMemberId != null &&
-                                    currentMemberId != null &&
-                                    currentMemberId.toString() == _userMemberId.toString();
-                                return DataRow(
-                                  cells: [
-                                    DataCell(Text(r['role_name'] ?? '')),
-                                    DataCell(Text(r['time_in'] ?? '')),
-                                    DataCell(Text(r['time_out'] ?? '')),
-                                    DataCell(Text(
-                                      hasVolunteer ? volunteer : 'Unassigned',
-                                      style: TextStyle(
-                                        color: hasVolunteer ? Colors.black : Colors.grey,
-                                        fontWeight: isCurrentUser ? FontWeight.bold : FontWeight.normal,
-                                      ),
-                                    )),
-                                    DataCell(
-                                      Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          _isAdmin
-                                              ? TextButton(
-                                                  onPressed: () => _pickVolunteer(r),
-                                                  child: Text(hasVolunteer ? 'Change' : 'Assign'),
-                                                )
-                                              : isCurrentUser
-                                                  ? TextButton(
-                                                      onPressed: _showChangeMyMindDialog,
-                                                      style: TextButton.styleFrom(foregroundColor: Colors.orange),
-                                                      child: const Text('Change My Mind'),
-                                                    )
-                                                  : hasVolunteer
-                                                      ? const SizedBox.shrink()
-                                                      : _isPastEvent
-                                                          ? const SizedBox.shrink()
-                                                          : TextButton(
-                                                              onPressed: () => _volunteerSelf(r),
-                                                              child: const Text('Volunteer'),
-                                                            ),
-                                          if (_isAdmin && _isOther)
-                                            IconButton(
-                                              tooltip: 'Delete role',
-                                              icon: const Icon(Icons.delete, color: Colors.red),
-                                              onPressed: () {
-                                                final roleId = int.tryParse(r['role_id']?.toString() ?? '');
-                                                if (roleId != null) _deleteRole(roleId);
-                                              },
-                                            ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                );
-                              }).toList(),
-                            ),
-                          ),
-                          const SizedBox(height: 24),
-                          Card(
-                            elevation: 0,
-                            color: Colors.grey.shade50,
-                            child: Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Text('Notes', style: theme.textTheme.titleMedium),
-                                      if (_isAdmin)
-                                        _isEditingNotes
-                                            ? Row(
-                                                children: [
-                                                  TextButton(
-                                                    onPressed: () {
-                                                      setState(() {
-                                                        _isEditingNotes = false;
-                                                        _notesController.text = _event!['notes']?.toString() ?? '';
-                                                      });
-                                                    },
-                                                    child: const Text('Cancel'),
-                                                  ),
-                                                  const SizedBox(width: 8),
-                                                  FilledButton(onPressed: _saveNotes, child: const Text('Save')),
-                                                ],
-                                              )
-                                            : IconButton(
-                                                icon: const Icon(Icons.edit),
-                                                tooltip: 'Edit notes',
-                                                onPressed: () {
-                                                  setState(() {
-                                                    _isEditingNotes = true;
-                                                    _notesController.text = _event!['notes']?.toString() ?? '';
-                                                  });
-                                                },
-                                              ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 8),
-                                  _isEditingNotes
-                                      ? TextField(
-                                          controller: _notesController,
-                                          maxLines: 6,
-                                          decoration: const InputDecoration(
-                                            hintText: 'Add event notes here...',
-                                            border: OutlineInputBorder(),
-                                          ),
-                                        )
-                                      : Text(
-                                          _event!['notes']?.toString().isEmpty ?? true
-                                              ? 'No notes yet'
-                                              : _event!['notes'].toString(),
-                                          style: TextStyle(
-                                            color: _event!['notes']?.toString().isEmpty ?? true
-                                                ? Colors.grey
-                                                : Colors.black,
-                                          ),
-                                        ),
-                                ],
-                              ),
-                            ),
-                          ),
+                          const SizedBox(height: 8),
+                          Text('Club: ${_event!['club_name'] ?? ''}'),
+                          Text('Date: ${_event!['date'] ?? ''}'),
+                          Text('Location: ${_event!['location'] ?? ''}'),
                         ],
                       ),
                     ),
+                  ),
+                  const SizedBox(height: 16),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: DataTable(
+                      headingRowColor: MaterialStateProperty.all(
+                        Colors.red.shade100,
+                      ),
+                      border: TableBorder.all(color: Colors.grey.shade300),
+                      columns: const [
+                        DataColumn(
+                          label: Text(
+                            'Role',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        DataColumn(
+                          label: Text(
+                            'Time In',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        DataColumn(
+                          label: Text(
+                            'Time Out',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        DataColumn(
+                          label: Text(
+                            'Volunteer',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        DataColumn(
+                          label: Text(
+                            'Action',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
+                      rows: _roles.map((r) {
+                        final volunteer = r['volunteer_name'] ?? '';
+                        final hasVolunteer = volunteer.toString().isNotEmpty;
+                        final currentMemberId = r['member_id'];
+                        final isCurrentUser =
+                            _userMemberId != null &&
+                            currentMemberId != null &&
+                            currentMemberId.toString() ==
+                                _userMemberId.toString();
+                        return DataRow(
+                          cells: [
+                            DataCell(Text(r['role_name'] ?? '')),
+                            DataCell(Text(r['time_in'] ?? '')),
+                            DataCell(Text(r['time_out'] ?? '')),
+                            DataCell(
+                              Text(
+                                hasVolunteer ? volunteer : 'Unassigned',
+                                style: TextStyle(
+                                  color: hasVolunteer
+                                      ? Colors.black
+                                      : Colors.grey,
+                                  fontWeight: isCurrentUser
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                ),
+                              ),
+                            ),
+                            DataCell(
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _isAdmin
+                                      ? TextButton(
+                                          onPressed: () => _pickVolunteer(r),
+                                          child: Text(
+                                            hasVolunteer ? 'Change' : 'Assign',
+                                          ),
+                                        )
+                                      : isCurrentUser
+                                      ? TextButton(
+                                          onPressed: _showChangeMyMindDialog,
+                                          style: TextButton.styleFrom(
+                                            foregroundColor: Colors.orange,
+                                          ),
+                                          child: const Text('Change My Mind'),
+                                        )
+                                      : hasVolunteer
+                                      ? const SizedBox.shrink()
+                                      : _isPastEvent
+                                      ? const SizedBox.shrink()
+                                      : TextButton(
+                                          onPressed: () => _volunteerSelf(r),
+                                          child: const Text('Volunteer'),
+                                        ),
+                                  if (_isAdmin && _isOther)
+                                    IconButton(
+                                      tooltip: 'Delete role',
+                                      icon: const Icon(
+                                        Icons.delete,
+                                        color: Colors.red,
+                                      ),
+                                      onPressed: () {
+                                        final roleId = int.tryParse(
+                                          r['role_id']?.toString() ?? '',
+                                        );
+                                        if (roleId != null) _deleteRole(roleId);
+                                      },
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Card(
+                    elevation: 0,
+                    color: Colors.grey.shade50,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('Notes', style: theme.textTheme.titleMedium),
+                              if (_isAdmin)
+                                _isEditingNotes
+                                    ? Row(
+                                        children: [
+                                          TextButton(
+                                            onPressed: () {
+                                              setState(() {
+                                                _isEditingNotes = false;
+                                                _notesController.text =
+                                                    _event!['notes']
+                                                        ?.toString() ??
+                                                    '';
+                                              });
+                                            },
+                                            child: const Text('Cancel'),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          FilledButton(
+                                            onPressed: _saveNotes,
+                                            child: const Text('Save'),
+                                          ),
+                                        ],
+                                      )
+                                    : IconButton(
+                                        icon: const Icon(Icons.edit),
+                                        tooltip: 'Edit notes',
+                                        onPressed: () {
+                                          setState(() {
+                                            _isEditingNotes = true;
+                                            _notesController.text =
+                                                _event!['notes']?.toString() ??
+                                                '';
+                                          });
+                                        },
+                                      ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          _isEditingNotes
+                              ? TextField(
+                                  controller: _notesController,
+                                  maxLines: 6,
+                                  decoration: const InputDecoration(
+                                    hintText: 'Add event notes here...',
+                                    border: OutlineInputBorder(),
+                                  ),
+                                )
+                              : Text(
+                                  _event!['notes']?.toString().isEmpty ?? true
+                                      ? 'No notes yet'
+                                      : _event!['notes'].toString(),
+                                  style: TextStyle(
+                                    color:
+                                        _event!['notes']?.toString().isEmpty ??
+                                            true
+                                        ? Colors.grey
+                                        : Colors.black,
+                                  ),
+                                ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
     );
   }
 }

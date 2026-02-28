@@ -3,7 +3,7 @@
 ; Non-commercial use only
 
 #define MyAppName "Lions Club App"
-#define MyAppVersion "3.0.2"
+#define MyAppVersion "4.2.1"
 #define MyAppPublisher "Lions Club"
 #define MyAppURL "https://github.com/ianehyndman-max/Lions_App"
 #define MyAppExeName "lions_app_3.exe"
@@ -32,7 +32,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 DisableProgramGroupPage=yes
 ; Uncomment the following line to run in non administrative install mode (install for current user only).
 ;PrivilegesRequired=lowest
-OutputBaseFilename=LionsClubApp_Setup_v3.0.2
+OutputBaseFilename=LionsClubApp_Setup_v4.2.1
 SolidCompression=yes
 WizardStyle=modern dynamic
 

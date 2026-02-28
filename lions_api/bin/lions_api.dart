@@ -10,10 +10,6 @@ import 'package:mailer/mailer.dart';
 import 'package:mailer/smtp_server.dart';
 import 'package:path/path.dart' as p;
 
-
-
-
-
 // ---------------- Diagnostics ----------------
 void debugDbDiagnostics({
   required String dbHost,
@@ -27,8 +23,10 @@ void debugDbDiagnostics({
   stderr.writeln('DEBUG: Starting DB diagnostics');
   stderr.writeln('DEBUG: current working directory: ${Directory.current.path}');
   stderr.writeln('DEBUG: script directory: $scriptDir');
-  stderr.writeln('DEBUG: resolved DB config -> host=$dbHost port=$dbPort user=$dbUser db=${dbName ?? "<none>"}');
-  stderr.writeln('DEBUG: DB password present=${(dbPassword ?? '').isNotEmpty} (hidden)');
+  stderr.writeln(
+      'DEBUG: resolved DB config -> host=$dbHost port=$dbPort user=$dbUser db=${dbName ?? "<none>"}');
+  stderr.writeln(
+      'DEBUG: DB password present=${(dbPassword ?? '').isNotEmpty} (hidden)');
   stderr.writeln('DEBUG: env DB_HOST=${Platform.environment['DB_HOST']}');
   stderr.writeln('DEBUG: env DB_PORT=${Platform.environment['DB_PORT']}');
   stderr.writeln('DEBUG: env DB_USER=${Platform.environment['DB_USER']}');
@@ -43,8 +41,10 @@ void debugDbDiagnostics({
 }
 
 // ---------------- Config (env first) ----------------
-String _envOr(String key, String fallback) => Platform.environment[key] ?? fallback;
-final _dbHost = _envOr('DB_HOST', 'lions-club-db.c12ge624w2tu.ap-southeast-2.rds.amazonaws.com');
+String _envOr(String key, String fallback) =>
+    Platform.environment[key] ?? fallback;
+final _dbHost = _envOr(
+    'DB_HOST', 'lions-club-db.c12ge624w2tu.ap-southeast-2.rds.amazonaws.com');
 //final _dbHost = _envOr('DB_HOST', 'localhost');
 final _dbPort = int.tryParse(Platform.environment['DB_PORT'] ?? '') ?? 3306;
 final _dbUser = _envOr('DB_USER', 'admin');
@@ -53,13 +53,17 @@ final _dbPass = _envOr('DB_PASS', 'ML4231LionsApp!');
 //final _dbPass = _envOr('DB_PASS', 'IanMySql1*.*');
 final _dbName = _envOr('DB_NAME', 'lions');
 
-
 final _smtpUser = _envOr('SMTP_USER', '');
 final _smtpPass = _envOr('SMTP_PASS', '');
 
 // ---------------- DB connect ----------------
 Future<MySQLConnection> _connect() async {
-  debugDbDiagnostics(dbHost: _dbHost, dbPort: _dbPort, dbUser: _dbUser, dbName: _dbName, dbPassword: _dbPass);
+  debugDbDiagnostics(
+      dbHost: _dbHost,
+      dbPort: _dbPort,
+      dbUser: _dbUser,
+      dbName: _dbName,
+      dbPassword: _dbPass);
 
   final conn = await MySQLConnection.createConnection(
     host: _dbHost,
@@ -89,7 +93,7 @@ Future<void> _logAudit(
       INSERT INTO audit_log (entity_type, entity_id, action, changed_by_member_id, old_value, new_value)
       VALUES (:entityType, :entityId, :action, :changedBy, :oldVal, :newVal)
     ''';
-    
+
     await conn.execute(sql, {
       'entityType': entityType,
       'entityId': entityId,
@@ -98,13 +102,13 @@ Future<void> _logAudit(
       'oldVal': oldValue != null ? jsonEncode(oldValue) : null,
       'newVal': newValue != null ? jsonEncode(newValue) : null,
     });
-    
-    stderr.writeln('✅ Audit logged: $action $entityType #$entityId by member #$changedByMemberId');
+
+    stderr.writeln(
+        '✅ Audit logged: $action $entityType #$entityId by member #$changedByMemberId');
   } catch (e) {
     stderr.writeln('⚠️ Audit log failed: $e');
   }
 }
-
 
 Future<void> _sendEmail({
   required String to,
@@ -115,7 +119,8 @@ Future<void> _sendEmail({
   String? replyToEmail,
 }) async {
   if (_smtpUser.isEmpty || _smtpPass.isEmpty) {
-    throw StateError('SMTP credentials missing. Set SMTP_USER and SMTP_PASS in environment.');
+    throw StateError(
+        'SMTP credentials missing. Set SMTP_USER and SMTP_PASS in environment.');
   }
 
   // Brevo SMTP Configuration
@@ -125,7 +130,7 @@ Future<void> _sendEmail({
     username: _smtpUser,
     password: _smtpPass,
     ssl: false,
-    allowInsecure: true,  // Required for Windows certificate validation
+    allowInsecure: true, // Required for Windows certificate validation
     ignoreBadCertificate: true,
   );
 
@@ -144,9 +149,11 @@ Future<void> _sendEmail({
     message.headers['Reply-To'] = replyToEmail;
   }
 
-  stderr.writeln('📤 Attempting to send email to $to from $emailFrom via ${smtpServer.host}:${smtpServer.port}');
+  stderr.writeln(
+      '📤 Attempting to send email to $to from $emailFrom via ${smtpServer.host}:${smtpServer.port}');
   final sendReport = await send(message, smtpServer);
-  stderr.writeln('✉️ Email sent to $to from $emailFrom (reply-to: ${replyToEmail ?? "none"})');
+  stderr.writeln(
+      '✉️ Email sent to $to from $emailFrom (reply-to: ${replyToEmail ?? "none"})');
   stderr.writeln('📊 Send report: ${sendReport.toString()}');
 }
 
@@ -167,7 +174,8 @@ String _candidatePath(String filename) {
   return '';
 }
 
-Future<String> _renderTemplate(String filename, Map<String, String> vars) async {
+Future<String> _renderTemplate(
+    String filename, Map<String, String> vars) async {
   if (_templateCache.containsKey(filename)) {
     var out = _templateCache[filename]!;
     vars.forEach((k, v) => out = out.replaceAll('{{$k}}', v));
@@ -176,8 +184,10 @@ Future<String> _renderTemplate(String filename, Map<String, String> vars) async 
 
   final path = _candidatePath(filename);
   if (path.isEmpty) {
-    stderr.writeln('WARNING: template not found: $filename (checked script dir & cwd)');
-    final fallback = filename.toLowerCase().endsWith('.html') ? '<p></p>' : 'Notification';
+    stderr.writeln(
+        'WARNING: template not found: $filename (checked script dir & cwd)');
+    final fallback =
+        filename.toLowerCase().endsWith('.html') ? '<p></p>' : 'Notification';
     _templateCache[filename] = fallback;
     var out = fallback;
     vars.forEach((k, v) => out = out.replaceAll('{{$k}}', v));
@@ -192,7 +202,8 @@ Future<String> _renderTemplate(String filename, Map<String, String> vars) async 
     return out;
   } catch (e) {
     stderr.writeln('ERROR: failed to read template $path -> $e');
-    final fallback = filename.toLowerCase().endsWith('.html') ? '<p></p>' : 'Notification';
+    final fallback =
+        filename.toLowerCase().endsWith('.html') ? '<p></p>' : 'Notification';
     _templateCache[filename] = fallback;
     var out = fallback;
     vars.forEach((k, v) => out = out.replaceAll('{{$k}}', v));
@@ -222,9 +233,11 @@ Future<Response> _members(Request req) async {
       // Ensure is_admin and is_super are integers
       final isAdminVal = a['is_admin'];
       final isSuperVal = a['is_super'];
-      final isAdminInt = (isAdminVal == 1 || isAdminVal == true || isAdminVal == '1') ? 1 : 0;
-      final isSuperInt = (isSuperVal == 1 || isSuperVal == true || isSuperVal == '1') ? 1 : 0;
-      
+      final isAdminInt =
+          (isAdminVal == 1 || isAdminVal == true || isAdminVal == '1') ? 1 : 0;
+      final isSuperInt =
+          (isSuperVal == 1 || isSuperVal == true || isSuperVal == '1') ? 1 : 0;
+
       list.add({
         'id': a['id'],
         'name': a['name'],
@@ -236,7 +249,8 @@ Future<Response> _members(Request req) async {
         'club_name': a['club_name'],
       });
     }
-    return Response.ok(jsonEncode(list), headers: {'Content-Type': 'application/json'});
+    return Response.ok(jsonEncode(list),
+        headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ Error in _members: $e\n$st');
     return Response.internalServerError(body: 'Error: $e');
@@ -258,25 +272,34 @@ int? _getMemberIdFromRequest(Request req) {
 
 /// Check if member is super user
 Future<bool> _isSuper(MySQLConnection conn, int memberId) async {
-  final r = await conn.execute('SELECT is_super FROM members WHERE id=:id', {'id': memberId.toString()});
+  final r = await conn.execute(
+      'SELECT is_super FROM members WHERE id=:id', {'id': memberId.toString()});
   if (r.rows.isEmpty) return false;
   final val = r.rows.first.assoc()['is_super'];
   if (val == null) return false;
-  return val == 1 || val == true || val == '1' || (val is List && val.isNotEmpty && val[0] == 1);
+  return val == 1 ||
+      val == true ||
+      val == '1' ||
+      (val is List && val.isNotEmpty && val[0] == 1);
 }
 
 /// Check if member is admin
 Future<bool> _isAdmin(MySQLConnection conn, int memberId) async {
-  final r = await conn.execute('SELECT is_admin FROM members WHERE id=:id', {'id': memberId.toString()});
+  final r = await conn.execute(
+      'SELECT is_admin FROM members WHERE id=:id', {'id': memberId.toString()});
   if (r.rows.isEmpty) return false;
   final val = r.rows.first.assoc()['is_admin'];
   if (val == null) return false;
-  return val == 1 || val == true || val == '1' || (val is List && val.isNotEmpty && val[0] == 1);
+  return val == 1 ||
+      val == true ||
+      val == '1' ||
+      (val is List && val.isNotEmpty && val[0] == 1);
 }
 
 /// Get member's club_id
 Future<int?> _getMemberClubId(MySQLConnection conn, int memberId) async {
-  final r = await conn.execute('SELECT lions_club_id FROM members WHERE id=:id', {'id': memberId.toString()});
+  final r = await conn.execute('SELECT lions_club_id FROM members WHERE id=:id',
+      {'id': memberId.toString()});
   if (r.rows.isEmpty) return null;
   final val = r.rows.first.assoc()['lions_club_id'];
   return val == null ? null : int.tryParse(val.toString());
@@ -287,18 +310,23 @@ Future<Response> _events(Request req) async {
   MySQLConnection? conn;
   try {
     conn = await _connect();
-    
+
     // Get query parameters for filtering
     final typeIdStr = req.url.queryParameters['type_id'];
-    final dateRange = req.url.queryParameters['date_range']; // 'today', 'week', 'month'
-    
+    final dateRange =
+        req.url.queryParameters['date_range']; // 'today', 'week', 'month'
+
     // Authorization: filter by club unless super user
     final authMemberId = _getMemberIdFromRequest(req);
-    final isSuper = authMemberId != null ? await _isSuper(conn, authMemberId) : false;
-    final memberClubId = authMemberId != null && !isSuper ? await _getMemberClubId(conn, authMemberId) : null;
-    
-    stderr.writeln('DEBUG: authMemberId=$authMemberId isSuper=$isSuper memberClubId=$memberClubId typeId=$typeIdStr dateRange=$dateRange');
-    
+    final isSuper =
+        authMemberId != null ? await _isSuper(conn, authMemberId) : false;
+    final memberClubId = authMemberId != null && !isSuper
+        ? await _getMemberClubId(conn, authMemberId)
+        : null;
+
+    stderr.writeln(
+        'DEBUG: authMemberId=$authMemberId isSuper=$isSuper memberClubId=$memberClubId typeId=$typeIdStr dateRange=$dateRange');
+
     // Build SQL with filters
     var sql = '''
       SELECT e.id, e.event_type_id, et.name AS event_type, lc.name AS club_name, e.event_date, e.location
@@ -307,21 +335,21 @@ Future<Response> _events(Request req) async {
       LEFT JOIN lions_club lc ON e.lions_club_id = lc.id
       WHERE e.event_date >= CURDATE()
     ''';
-    
+
     final params = <String, String>{};
-    
+
     // Add club filter for non-super users
     if (memberClubId != null) {
       sql += ' AND e.lions_club_id = :clubId';
       params['clubId'] = memberClubId.toString();
     }
-    
+
     // Add event type filter
     if (typeIdStr != null && typeIdStr.isNotEmpty) {
       sql += ' AND e.event_type_id = :typeId';
       params['typeId'] = typeIdStr;
     }
-    
+
     // Add date range filter
     if (dateRange != null && dateRange.isNotEmpty) {
       final now = DateTime.now();
@@ -347,11 +375,11 @@ Future<Response> _events(Request req) async {
           break;
       }
     }
-    
+
     sql += ' ORDER BY e.event_date';
-    
+
     stderr.writeln('DEBUG: SQL=$sql params=$params');
-    
+
     final result = await conn.execute(sql, params.isNotEmpty ? params : null);
     final list = <Map<String, dynamic>>[];
     for (final row in result.rows) {
@@ -365,8 +393,10 @@ Future<Response> _events(Request req) async {
         'location': a['location'],
       });
     }
-    stderr.writeln('DEBUG: Returning ${list.length} events (filtered by type=$typeIdStr range=$dateRange)');
-    return Response.ok(jsonEncode(list), headers: {'Content-Type': 'application/json'});
+    stderr.writeln(
+        'DEBUG: Returning ${list.length} events (filtered by type=$typeIdStr range=$dateRange)');
+    return Response.ok(jsonEncode(list),
+        headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ Error in _events: $e\n$st');
     return Response.internalServerError(body: 'Error: $e');
@@ -384,10 +414,14 @@ Future<Response> _eventsCalendar(Request req) async {
     conn = await _connect();
     // Authorization: filter by club unless super user
     final authMemberId = _getMemberIdFromRequest(req);
-    final isSuper = authMemberId != null ? await _isSuper(conn, authMemberId) : false;
-    final memberClubId = authMemberId != null && !isSuper ? await _getMemberClubId(conn, authMemberId) : null;
-    
-    stderr.writeln('DEBUG: calendar authMemberId=$authMemberId isSuper=$isSuper memberClubId=$memberClubId');
+    final isSuper =
+        authMemberId != null ? await _isSuper(conn, authMemberId) : false;
+    final memberClubId = authMemberId != null && !isSuper
+        ? await _getMemberClubId(conn, authMemberId)
+        : null;
+
+    stderr.writeln(
+        'DEBUG: calendar authMemberId=$authMemberId isSuper=$isSuper memberClubId=$memberClubId');
     final sql = '''
       SELECT e.id, et.name AS event_type, lc.name AS club_name, e.event_date, e.location
       FROM events e
@@ -396,7 +430,8 @@ Future<Response> _eventsCalendar(Request req) async {
       ${memberClubId != null ? 'WHERE e.lions_club_id = :clubId' : ''}
       ORDER BY e.event_date
     ''';
-    final result = await conn.execute(sql, memberClubId != null ? {'clubId': memberClubId.toString()} : null);
+    final result = await conn.execute(
+        sql, memberClubId != null ? {'clubId': memberClubId.toString()} : null);
     final list = <Map<String, dynamic>>[];
     for (final row in result.rows) {
       final a = row.assoc();
@@ -408,7 +443,8 @@ Future<Response> _eventsCalendar(Request req) async {
         'location': a['location'],
       });
     }
-    return Response.ok(jsonEncode(list), headers: {'Content-Type': 'application/json'});
+    return Response.ok(jsonEncode(list),
+        headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ Error in _eventsCalendar: $e\n$st');
     return Response.internalServerError(body: 'Error: $e');
@@ -422,13 +458,15 @@ Future<Response> _eventTypes(Request req) async {
   MySQLConnection? conn;
   try {
     conn = await _connect();
-    final result = await conn.execute('SELECT id, name FROM event_types ORDER BY name');
+    final result =
+        await conn.execute('SELECT id, name FROM event_types ORDER BY name');
     final list = <Map<String, dynamic>>[];
     for (final row in result.rows) {
       final a = row.assoc();
       list.add({'id': a['id'], 'name': a['name']});
     }
-    return Response.ok(jsonEncode(list), headers: {'Content-Type': 'application/json'});
+    return Response.ok(jsonEncode(list),
+        headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ Error in _eventTypes: $e\n$st');
     return Response.internalServerError(body: 'Error: $e');
@@ -456,7 +494,7 @@ Future<Response> _createEvent(Request req) async {
       stderr.writeln('❌ Failed to read body: $e');
       return Response(400, body: 'Failed to read request body');
     }
-    
+
     if (raw.isEmpty) {
       stderr.writeln('🔵 POST _createEvent if raw empty 1 #1');
       stderr.writeln('❌ Empty body');
@@ -479,7 +517,8 @@ Future<Response> _createEvent(Request req) async {
     final eventDate = bodyJson['event_date']?.toString() ?? '';
     final location = bodyJson['location']?.toString() ?? '';
     final notes = bodyJson['notes']?.toString() ?? '';
-    final customRoles = (bodyJson['roles'] as List<dynamic>?)?.cast<Map<String, dynamic>>();
+    final customRoles =
+        (bodyJson['roles'] as List<dynamic>?)?.cast<Map<String, dynamic>>();
 
     stderr.writeln('🔵 Parsed values:');
     stderr.writeln('  - eventTypeId: $eventTypeId');
@@ -490,7 +529,9 @@ Future<Response> _createEvent(Request req) async {
     stderr.writeln('  - roles count: ${customRoles?.length ?? 0}');
 
     if (eventTypeId == null || clubId == null || eventDate.isEmpty) {
-      return Response(400, body: 'Missing required fields: event_type_id, lions_club_id, event_date');
+      return Response(400,
+          body:
+              'Missing required fields: event_type_id, lions_club_id, event_date');
     }
 
     conn = await _connect();
@@ -520,7 +561,7 @@ Future<Response> _createEvent(Request req) async {
         final roleName = r['role_name']?.toString() ?? '';
         final timeIn = r['time_in']?.toString() ?? '';
         final timeOut = r['time_out']?.toString() ?? '';
-        
+
         if (roleName.isEmpty) continue;
 
         await conn.execute('''
@@ -554,10 +595,8 @@ Future<Response> _createEvent(Request req) async {
       },
     );
 
-    return Response.ok(
-      jsonEncode({'event_id': newId.toString()}),
-      headers: {'Content-Type': 'application/json'}
-    );
+    return Response.ok(jsonEncode({'event_id': newId.toString()}),
+        headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ ERROR in _createEvent:');
     stderr.writeln('  Exception: $e');
@@ -577,13 +616,16 @@ Future<Response> _deleteEvent(Request req, String eventId) async {
     if (eid == 0) return Response(400, body: 'Invalid event id');
 
     // Fetch old value BEFORE delete for audit log
-    final oldRow = await conn.execute('SELECT * FROM events WHERE id = :eid', {'eid': eid});
+    final oldRow = await conn
+        .execute('SELECT * FROM events WHERE id = :eid', {'eid': eid});
     final oldValue = oldRow.rows.isNotEmpty ? oldRow.rows.first.assoc() : null;
 
     await conn.execute('START TRANSACTION');
     try {
-      await conn.execute('DELETE FROM event_volunteers WHERE event_id = :eid', {'eid': eid});
-      await conn.execute('DELETE FROM roles WHERE event_id = :eid', {'eid': eid});
+      await conn.execute(
+          'DELETE FROM event_volunteers WHERE event_id = :eid', {'eid': eid});
+      await conn
+          .execute('DELETE FROM roles WHERE event_id = :eid', {'eid': eid});
       await conn.execute('DELETE FROM events WHERE id = :eid', {'eid': eid});
       await conn.execute('COMMIT');
     } catch (e) {
@@ -623,7 +665,7 @@ Future<Response> _updateEvent(Request req, String eventId) async {
     if (authMemberId == null) return Response(401, body: 'Unauthorized');
 
     conn = await _connect();
-    
+
     final isAdmin = await _isAdmin(conn, authMemberId);
     final isSuper = await _isSuper(conn, authMemberId);
     if (!isAdmin && !isSuper) {
@@ -631,7 +673,8 @@ Future<Response> _updateEvent(Request req, String eventId) async {
     }
 
     // Get old values for audit
-    final oldRow = await conn.execute('SELECT * FROM events WHERE id = :id', {'id': eventId});
+    final oldRow = await conn
+        .execute('SELECT * FROM events WHERE id = :id', {'id': eventId});
     final oldValue = oldRow.rows.isNotEmpty ? oldRow.rows.first.assoc() : null;
 
     final raw = await req.readAsString();
@@ -683,7 +726,8 @@ Future<Response> _updateEvent(Request req, String eventId) async {
     );
 
     stderr.writeln('✅ Event $eventId updated');
-    return Response.ok(jsonEncode({'success': true}), headers: {'Content-Type': 'application/json'});
+    return Response.ok(jsonEncode({'success': true}),
+        headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ Error in _updateEvent: $e\n$st');
     return Response.internalServerError(body: 'Error: $e');
@@ -725,7 +769,8 @@ Future<Response> _eventDetails(Request req, String eventId) async {
     ''';
 
     final rolesResult = await conn.execute(rolesSql, {'eventId': eid});
-    stderr.writeln('DEBUG: /events/$eventId found ${rolesResult.rows.length} roles');
+    stderr.writeln(
+        'DEBUG: /events/$eventId found ${rolesResult.rows.length} roles');
 
     final roles = rolesResult.rows.map((row) {
       final a = row.assoc();
@@ -752,7 +797,8 @@ Future<Response> _eventDetails(Request req, String eventId) async {
       },
       'roles': roles,
     };
-    return Response.ok(jsonEncode(resp), headers: {'Content-Type': 'application/json'});
+    return Response.ok(jsonEncode(resp),
+        headers: {'Content-Type': 'application/json'});
   } catch (err, st) {
     stderr.writeln('❌ Error in _eventDetails: $err\n$st');
     return Response.internalServerError(body: 'Error: $err');
@@ -767,7 +813,7 @@ Future<Response> _getRoleTemplates(Request req, String eventTypeId) async {
   MySQLConnection? conn;
   try {
     conn = await _connect();
-    
+
     final result = await conn.execute('''
       SELECT id, role_name, time_in, time_out
       FROM roles
@@ -786,7 +832,8 @@ Future<Response> _getRoleTemplates(Request req, String eventTypeId) async {
       });
     }
 
-    return Response.ok(jsonEncode(templates), headers: {'Content-Type': 'application/json'});
+    return Response.ok(jsonEncode(templates),
+        headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ Error in _getRoleTemplates: $e\n$st');
     return Response.internalServerError(body: 'Error: $e');
@@ -806,7 +853,7 @@ Future<Response> _saveRoleTemplate(Request req, String eventTypeId) async {
     }
 
     conn = await _connect();
-    
+
     // Only admins/super can manage templates
     final isAdmin = await _isAdmin(conn, authMemberId);
     final isSuper = await _isSuper(conn, authMemberId);
@@ -849,14 +896,22 @@ Future<Response> _saveRoleTemplate(Request req, String eventTypeId) async {
         entityId: int.parse(newId!),
         action: 'CREATE',
         changedByMemberId: authMemberId,
-        newValue: {'event_type_id': eventTypeId, 'role_name': roleName, 'time_in': timeIn, 'time_out': timeOut},
+        newValue: {
+          'event_type_id': eventTypeId,
+          'role_name': roleName,
+          'time_in': timeIn,
+          'time_out': timeOut
+        },
       );
 
-      return Response.ok(jsonEncode({'id': newId}), headers: {'Content-Type': 'application/json'});
+      return Response.ok(jsonEncode({'id': newId}),
+          headers: {'Content-Type': 'application/json'});
     } else {
       // Update existing template
-      final oldRow = await conn.execute('SELECT * FROM roles WHERE id = :id', {'id': templateId});
-      final oldValue = oldRow.rows.isNotEmpty ? oldRow.rows.first.assoc() : null;
+      final oldRow = await conn
+          .execute('SELECT * FROM roles WHERE id = :id', {'id': templateId});
+      final oldValue =
+          oldRow.rows.isNotEmpty ? oldRow.rows.first.assoc() : null;
 
       await conn.execute('''
         UPDATE roles
@@ -877,10 +932,15 @@ Future<Response> _saveRoleTemplate(Request req, String eventTypeId) async {
         action: 'UPDATE',
         changedByMemberId: authMemberId,
         oldValue: oldValue,
-        newValue: {'role_name': roleName, 'time_in': timeIn, 'time_out': timeOut},
+        newValue: {
+          'role_name': roleName,
+          'time_in': timeIn,
+          'time_out': timeOut
+        },
       );
 
-      return Response.ok(jsonEncode({'success': true}), headers: {'Content-Type': 'application/json'});
+      return Response.ok(jsonEncode({'success': true}),
+          headers: {'Content-Type': 'application/json'});
     }
   } catch (e, st) {
     stderr.writeln('❌ Error in _saveRoleTemplate: $e\n$st');
@@ -901,7 +961,7 @@ Future<Response> _deleteRoleTemplate(Request req, String templateId) async {
     }
 
     conn = await _connect();
-    
+
     final isAdmin = await _isAdmin(conn, authMemberId);
     final isSuper = await _isSuper(conn, authMemberId);
     if (!isAdmin && !isSuper) {
@@ -909,10 +969,13 @@ Future<Response> _deleteRoleTemplate(Request req, String templateId) async {
     }
 
     // Fetch before delete for audit
-    final oldRow = await conn.execute('SELECT * FROM roles WHERE id = :id AND event_id IS NULL', {'id': templateId});
+    final oldRow = await conn.execute(
+        'SELECT * FROM roles WHERE id = :id AND event_id IS NULL',
+        {'id': templateId});
     final oldValue = oldRow.rows.isNotEmpty ? oldRow.rows.first.assoc() : null;
 
-    await conn.execute('DELETE FROM roles WHERE id = :id AND event_id IS NULL', {'id': templateId});
+    await conn.execute('DELETE FROM roles WHERE id = :id AND event_id IS NULL',
+        {'id': templateId});
 
     // Log audit
     await _logAudit(
@@ -938,7 +1001,8 @@ Future<Response> _clubs(Request req) async {
   MySQLConnection? conn;
   try {
     conn = await _connect();
-    final result = await conn.execute('SELECT id, name, email_subdomain, reply_to_email, from_name FROM lions_club ORDER BY name');
+    final result = await conn.execute(
+        'SELECT id, name, email_subdomain, reply_to_email, from_name FROM lions_club ORDER BY name');
     final list = <Map<String, dynamic>>[];
     for (final row in result.rows) {
       final a = row.assoc();
@@ -950,7 +1014,8 @@ Future<Response> _clubs(Request req) async {
         'from_name': a['from_name'],
       });
     }
-    return Response.ok(jsonEncode(list), headers: {'Content-Type': 'application/json'});
+    return Response.ok(jsonEncode(list),
+        headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ Error in _clubs: $e\n$st');
     return Response.internalServerError(body: 'Error: $e');
@@ -970,7 +1035,7 @@ Future<Response> _createClub(Request req) async {
     }
 
     conn = await _connect();
-    
+
     // Check super user permission
     if (!await _isSuper(conn, authMemberId)) {
       return Response(403, body: 'Forbidden: super user access required');
@@ -982,8 +1047,9 @@ Future<Response> _createClub(Request req) async {
 
     final name = (bodyJson['name'] ?? '').toString().trim();
     if (name.isEmpty) return Response(400, body: 'Club name required');
-    
-    final emailSubdomain = (bodyJson['email_subdomain'] ?? '').toString().trim();
+
+    final emailSubdomain =
+        (bodyJson['email_subdomain'] ?? '').toString().trim();
     final replyToEmail = (bodyJson['reply_to_email'] ?? '').toString().trim();
     final fromName = (bodyJson['from_name'] ?? '').toString().trim();
 
@@ -1000,13 +1066,15 @@ Future<Response> _createClub(Request req) async {
     final newId = idRes.rows.first.assoc()['id'];
 
     stderr.writeln('✅ Created club: $name (id=$newId)');
-    return Response.ok(jsonEncode({
-      'id': newId.toString(),
-      'name': name,
-      'email_subdomain': emailSubdomain.isEmpty ? null : emailSubdomain,
-      'reply_to_email': replyToEmail.isEmpty ? null : replyToEmail,
-      'from_name': fromName.isEmpty ? null : fromName,
-    }), headers: {'Content-Type': 'application/json'});
+    return Response.ok(
+        jsonEncode({
+          'id': newId.toString(),
+          'name': name,
+          'email_subdomain': emailSubdomain.isEmpty ? null : emailSubdomain,
+          'reply_to_email': replyToEmail.isEmpty ? null : replyToEmail,
+          'from_name': fromName.isEmpty ? null : fromName,
+        }),
+        headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ Error in _createClub: $e\n$st');
     return Response.internalServerError(body: 'Error: $e');
@@ -1036,8 +1104,9 @@ Future<Response> _updateClub(Request req, String id) async {
 
     final name = (bodyJson['name'] ?? '').toString().trim();
     if (name.isEmpty) return Response(400, body: 'Club name required');
-    
-    final emailSubdomain = (bodyJson['email_subdomain'] ?? '').toString().trim();
+
+    final emailSubdomain =
+        (bodyJson['email_subdomain'] ?? '').toString().trim();
     final replyToEmail = (bodyJson['reply_to_email'] ?? '').toString().trim();
     final fromName = (bodyJson['from_name'] ?? '').toString().trim();
 
@@ -1057,7 +1126,8 @@ Future<Response> _updateClub(Request req, String id) async {
     });
 
     stderr.writeln('✅ Updated club id=$id name=$name');
-    return Response.ok(jsonEncode({'success': true}), headers: {'Content-Type': 'application/json'});
+    return Response.ok(jsonEncode({'success': true}),
+        headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ Error in _updateClub: $e\n$st');
     return Response.internalServerError(body: 'Error: $e');
@@ -1105,11 +1175,22 @@ Future<Response> _assignVolunteer(Request req, String eventId) async {
     final roleId = bodyJson['role_id'];
     final memberId = bodyJson['member_id'];
 
-    if (roleId == null || memberId == null) {
-      return Response(400, body: 'Missing required fields: role_id, member_id');
+    if (roleId == null) {
+      return Response(400, body: 'Missing required field: role_id');
     }
 
     conn = await _connect();
+
+    // If memberId is null, delete the assignment (clear it)
+    if (memberId == null) {
+      await conn.execute('''
+        DELETE FROM event_volunteers 
+        WHERE event_id = :eventId AND role_id = :roleId
+      ''', {'eventId': eventId, 'roleId': roleId.toString()});
+      stderr.writeln('✅ Cleared volunteer assignment for role $roleId');
+      return Response.ok(jsonEncode({'success': true}),
+          headers: {'Content-Type': 'application/json'});
+    }
 
     // Check if assignment already exists
     final existing = await conn.execute('''
@@ -1123,18 +1204,27 @@ Future<Response> _assignVolunteer(Request req, String eventId) async {
         UPDATE event_volunteers 
         SET member_id = :memberId 
         WHERE event_id = :eventId AND role_id = :roleId
-      ''', {'memberId': memberId.toString(), 'eventId': eventId, 'roleId': roleId.toString()});
+      ''', {
+        'memberId': memberId.toString(),
+        'eventId': eventId,
+        'roleId': roleId.toString()
+      });
       stderr.writeln('✅ Updated volunteer assignment for role $roleId');
     } else {
       // Create new assignment
       await conn.execute('''
         INSERT INTO event_volunteers (event_id, role_id, member_id)
         VALUES (:eventId, :roleId, :memberId)
-      ''', {'eventId': eventId, 'roleId': roleId.toString(), 'memberId': memberId.toString()});
+      ''', {
+        'eventId': eventId,
+        'roleId': roleId.toString(),
+        'memberId': memberId.toString()
+      });
       stderr.writeln('✅ Created volunteer assignment for role $roleId');
     }
 
-    return Response.ok(jsonEncode({'success': true}), headers: {'Content-Type': 'application/json'});
+    return Response.ok(jsonEncode({'success': true}),
+        headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ Error in _assignVolunteer: $e\n$st');
     return Response.internalServerError(body: 'Error: $e');
@@ -1144,7 +1234,8 @@ Future<Response> _assignVolunteer(Request req, String eventId) async {
 }
 
 // ---------------- Unassign volunteer from role ----------------
-Future<Response> _unassignVolunteer(Request req, String eventId, String roleId) async {
+Future<Response> _unassignVolunteer(
+    Request req, String eventId, String roleId) async {
   stderr.writeln('🔵 DELETE /events/$eventId/volunteers/$roleId');
   MySQLConnection? conn;
   try {
@@ -1165,7 +1256,6 @@ Future<Response> _unassignVolunteer(Request req, String eventId, String roleId) 
   }
 }
 
-
 // ---------------- Notify (email) ----------------
 Future<Response> _notifyEventMembers(Request req, String eventId) async {
   stderr.writeln('📧 POST /events/$eventId/notify');
@@ -1176,11 +1266,13 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
   } catch (_) {}
   final qp = req.url.queryParameters;
 
-  final onlyAssigned   = (bodyJson['only_assigned'] == true)   || (qp['only_assigned'] == 'true');
-  final resendUnfilled = (bodyJson['resend_unfilled'] == true) || (qp['resend_unfilled'] == 'true');
-  final dryRun         = (bodyJson['dry_run'] == true)         || (qp['dry_run'] == 'true');
+  final onlyAssigned =
+      (bodyJson['only_assigned'] == true) || (qp['only_assigned'] == 'true');
+  final resendUnfilled = (bodyJson['resend_unfilled'] == true) ||
+      (qp['resend_unfilled'] == 'true');
+  final dryRun = (bodyJson['dry_run'] == true) || (qp['dry_run'] == 'true');
 
-  final overrideSubject  = (bodyJson['subject'] as String?)?.trim();
+  final overrideSubject = (bodyJson['subject'] as String?)?.trim();
   final overrideBodyHtml = (bodyJson['body_html'] as String?)?.trim();
   final overrideBodyText = (bodyJson['body'] as String?)?.trim();
 
@@ -1201,12 +1293,14 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
     final event = eventResult.rows.first.assoc();
     final clubId = event['lions_club_id'];
     final isOther = (event['event_type'] ?? '').toString() == 'Other';
-    
+
     // Get club email settings
     final emailSubdomain = event['email_subdomain']?.toString();
     final replyToEmail = event['reply_to_email']?.toString();
-    final fromName = event['from_name']?.toString() ?? event['club_name']?.toString() ?? 'Lions Club';
-    
+    final fromName = event['from_name']?.toString() ??
+        event['club_name']?.toString() ??
+        'Lions Club';
+
     // Use a single verified sender (noreply@thelionsapp.com) for all clubs
     // Club personalization goes in the From Name, replies go to club's Reply-To
     const fromAddress = 'noreply@thelionsapp.com';
@@ -1249,7 +1343,7 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
       final r = row.assoc();
       final volunteerName = r['volunteer_name']?.toString() ?? '';
       final hasVolunteer = volunteerName.trim().isNotEmpty;
-      
+
       final volunteer = hasVolunteer ? volunteerName : '(Available)';
       rolesHtml.write('''
               <tr>
@@ -1272,7 +1366,8 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
     // Build template variables
     final vars = <String, String>{
       'event_type': event['event_type']?.toString() ?? '',
-      'event_name': '${event['event_type'] ?? ''} · ${event['club_name'] ?? ''}',
+      'event_name':
+          '${event['event_type'] ?? ''} · ${event['club_name'] ?? ''}',
       'date': event['event_date']?.toString() ?? '',
       'event_date': event['event_date']?.toString() ?? '',
       'location': event['location']?.toString() ?? '',
@@ -1285,13 +1380,19 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
     // Choose templates
     final subjectTemplateFile = onlyAssigned
         ? 'assigned_reminder_subject.txt'
-        : (resendUnfilled ? 'resend_unfilled_subject.txt' : 'new_event_subject.txt');
+        : (resendUnfilled
+            ? 'resend_unfilled_subject.txt'
+            : 'new_event_subject.txt');
     final bodyTemplateFile = onlyAssigned
         ? 'assigned_reminder_body.html'
-        : (resendUnfilled ? 'resend_unfilled_body.html' : 'new_event_body.html');
+        : (resendUnfilled
+            ? 'resend_unfilled_body.html'
+            : 'new_event_body.html');
 
-    final subject = overrideSubject ?? await _renderTemplate(subjectTemplateFile, vars);
-    final bodyHtml = overrideBodyHtml ?? await _renderTemplate(bodyTemplateFile, vars);
+    final subject =
+        overrideSubject ?? await _renderTemplate(subjectTemplateFile, vars);
+    final bodyHtml =
+        overrideBodyHtml ?? await _renderTemplate(bodyTemplateFile, vars);
 
     // Determine recipients
     List<String> recipients = [];
@@ -1304,7 +1405,8 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
       ''', {'eventId': eventId});
       for (final row in rRes.rows) {
         final e = row.assoc()['email'];
-        if (e != null && e.toString().trim().isNotEmpty) recipients.add(e.toString());
+        if (e != null && e.toString().trim().isNotEmpty)
+          recipients.add(e.toString());
       }
     } else {
       // club members
@@ -1315,7 +1417,8 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
       ''', {'clubId': clubId});
       for (final row in rRes.rows) {
         final e = row.assoc()['email'];
-        if (e != null && e.toString().trim().isNotEmpty) recipients.add(e.toString());
+        if (e != null && e.toString().trim().isNotEmpty)
+          recipients.add(e.toString());
       }
     }
 
@@ -1327,7 +1430,8 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
         'body_html': bodyHtml,
         'recipients': recipientsCsv,
       };
-      return Response.ok(jsonEncode(resp), headers: {'Content-Type': 'application/json'});
+      return Response.ok(jsonEncode(resp),
+          headers: {'Content-Type': 'application/json'});
     }
 
     // Send emails (sequential to simplify; switch to concurrency if needed)
@@ -1373,18 +1477,22 @@ Future<Response> _getAuditLogs(Request req) async {
     }
 
     conn = await _connect();
-    
+
     // Only super users can view audit logs
     if (!await _isSuper(conn, authMemberId)) {
       return Response(403, body: 'Forbidden: super user access required');
     }
 
     // Get optional filters
-    final entityType = req.url.queryParameters['entity_type']; // 'member', 'event', etc.
+    final entityType =
+        req.url.queryParameters['entity_type']; // 'member', 'event', etc.
     final entityId = req.url.queryParameters['entity_id'];
-    final action = req.url.queryParameters['action']; // 'CREATE', 'UPDATE', 'DELETE'
-    final memberId = req.url.queryParameters['member_id']; // who made the change
-    final limit = int.tryParse(req.url.queryParameters['limit'] ?? '100') ?? 100;
+    final action =
+        req.url.queryParameters['action']; // 'CREATE', 'UPDATE', 'DELETE'
+    final memberId =
+        req.url.queryParameters['member_id']; // who made the change
+    final limit =
+        int.tryParse(req.url.queryParameters['limit'] ?? '100') ?? 100;
 
     var sql = '''
       SELECT 
@@ -1448,7 +1556,8 @@ Future<Response> _getAuditLogs(Request req) async {
     }
 
     stderr.writeln('DEBUG: Returning ${logs.length} audit log entries');
-    return Response.ok(jsonEncode(logs), headers: {'Content-Type': 'application/json'});
+    return Response.ok(jsonEncode(logs),
+        headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ Error in _getAuditLogs: $e\n$st');
     return Response.internalServerError(body: 'Error: $e');
@@ -1466,7 +1575,7 @@ Future<Response> _addRoleToEvent(Request req, String eventId) async {
     if (authMemberId == null) return Response(401, body: 'Unauthorized');
 
     conn = await _connect();
-    
+
     final isAdmin = await _isAdmin(conn, authMemberId);
     final isSuper = await _isSuper(conn, authMemberId);
     if (!isAdmin && !isSuper) {
@@ -1505,10 +1614,16 @@ Future<Response> _addRoleToEvent(Request req, String eventId) async {
       entityId: int.parse(newId!),
       action: 'CREATE',
       changedByMemberId: authMemberId,
-      newValue: {'event_id': eventId, 'role_name': roleName, 'time_in': timeIn, 'time_out': timeOut},
+      newValue: {
+        'event_id': eventId,
+        'role_name': roleName,
+        'time_in': timeIn,
+        'time_out': timeOut
+      },
     );
 
-    return Response.ok(jsonEncode({'id': newId}), headers: {'Content-Type': 'application/json'});
+    return Response.ok(jsonEncode({'id': newId}),
+        headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ Error in _addRoleToEvent: $e\n$st');
     return Response.internalServerError(body: 'Error: $e');
@@ -1526,14 +1641,15 @@ Future<Response> _updateRole(Request req, String roleId) async {
     if (authMemberId == null) return Response(401, body: 'Unauthorized');
 
     conn = await _connect();
-    
+
     final isAdmin = await _isAdmin(conn, authMemberId);
     final isSuper = await _isSuper(conn, authMemberId);
     if (!isAdmin && !isSuper) {
       return Response(403, body: 'Forbidden: admin access required');
     }
 
-    final oldRow = await conn.execute('SELECT * FROM roles WHERE id = :id', {'id': roleId});
+    final oldRow = await conn
+        .execute('SELECT * FROM roles WHERE id = :id', {'id': roleId});
     final oldValue = oldRow.rows.isNotEmpty ? oldRow.rows.first.assoc() : null;
 
     final raw = await req.readAsString();
@@ -1570,7 +1686,8 @@ Future<Response> _updateRole(Request req, String roleId) async {
       newValue: {'role_name': roleName, 'time_in': timeIn, 'time_out': timeOut},
     );
 
-    return Response.ok(jsonEncode({'success': true}), headers: {'Content-Type': 'application/json'});
+    return Response.ok(jsonEncode({'success': true}),
+        headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ Error in _updateRole: $e\n$st');
     return Response.internalServerError(body: 'Error: $e');
@@ -1588,19 +1705,21 @@ Future<Response> _deleteRole(Request req, String roleId) async {
     if (authMemberId == null) return Response(401, body: 'Unauthorized');
 
     conn = await _connect();
-    
+
     final isAdmin = await _isAdmin(conn, authMemberId);
     final isSuper = await _isSuper(conn, authMemberId);
     if (!isAdmin && !isSuper) {
       return Response(403, body: 'Forbidden: admin access required');
     }
 
-    final oldRow = await conn.execute('SELECT * FROM roles WHERE id = :id', {'id': roleId});
+    final oldRow = await conn
+        .execute('SELECT * FROM roles WHERE id = :id', {'id': roleId});
     final oldValue = oldRow.rows.isNotEmpty ? oldRow.rows.first.assoc() : null;
 
     // Delete volunteer assignments first
-    await conn.execute('DELETE FROM event_volunteers WHERE role_id = :roleId', {'roleId': roleId});
-    
+    await conn.execute('DELETE FROM event_volunteers WHERE role_id = :roleId',
+        {'roleId': roleId});
+
     // Delete role
     await conn.execute('DELETE FROM roles WHERE id = :id', {'id': roleId});
 
@@ -1634,13 +1753,13 @@ Future<Response> _createEventType(Request req) async {
   try {
     final authMemberId = _getMemberIdFromRequest(req);
     if (authMemberId == null) return Response(401, body: 'Unauthorized');
-    
+
     conn = await _connect();
-    
+
     // Check if user is admin or super
     final isAdmin = await _isAdmin(conn, authMemberId);
     final isSuper = await _isSuper(conn, authMemberId);
-    
+
     if (!isAdmin && !isSuper) {
       return Response(403, body: 'Admin access required');
     }
@@ -1648,18 +1767,19 @@ Future<Response> _createEventType(Request req) async {
     final raw = await req.readAsString();
     if (raw.isEmpty) return Response(400, body: 'Missing body');
     final bodyJson = jsonDecode(raw) as Map<String, dynamic>;
-    
+
     final name = bodyJson['name']?.toString().trim();
-    
+
     if (name == null || name.isEmpty) {
       return Response(400, body: 'Event type name required');
     }
 
-    await conn.execute('INSERT INTO event_types (name) VALUES (:name)', {'name': name});
-    
+    await conn.execute(
+        'INSERT INTO event_types (name) VALUES (:name)', {'name': name});
+
     final idRes = await conn.execute('SELECT LAST_INSERT_ID() AS id');
     final newId = idRes.rows.first.assoc()['id'];
-    
+
     // Log audit
     await _logAudit(
       conn,
@@ -1669,12 +1789,14 @@ Future<Response> _createEventType(Request req) async {
       changedByMemberId: authMemberId,
       newValue: {'name': name},
     );
-    
+
     stderr.writeln('✅ Created event type: $name (id=$newId)');
-    return Response.ok(jsonEncode({'id': newId, 'name': name}), headers: {'Content-Type': 'application/json'});
+    return Response.ok(jsonEncode({'id': newId, 'name': name}),
+        headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ Error in _createEventType: $e\n$st');
-    return Response.internalServerError(body: 'Failed to create event type: $e');
+    return Response.internalServerError(
+        body: 'Failed to create event type: $e');
   } finally {
     await conn?.close();
   }
@@ -1687,38 +1809,41 @@ Future<Response> _updateEventType(Request req, String id) async {
   try {
     final authMemberId = _getMemberIdFromRequest(req);
     if (authMemberId == null) return Response(401, body: 'Unauthorized');
-    
+
     conn = await _connect();
-    
+
     // Check if user is admin or super
     final isAdmin = await _isAdmin(conn, authMemberId);
     final isSuper = await _isSuper(conn, authMemberId);
-    
+
     if (!isAdmin && !isSuper) {
       return Response(403, body: 'Admin access required');
     }
 
     // Get old value for audit
-    final oldRow = await conn.execute('SELECT * FROM event_types WHERE id = :id', {'id': id});
+    final oldRow = await conn
+        .execute('SELECT * FROM event_types WHERE id = :id', {'id': id});
     final oldValue = oldRow.rows.isNotEmpty ? oldRow.rows.first.assoc() : null;
 
     final raw = await req.readAsString();
     if (raw.isEmpty) return Response(400, body: 'Missing body');
     final bodyJson = jsonDecode(raw) as Map<String, dynamic>;
-    
+
     final name = bodyJson['name']?.toString().trim();
-    
+
     if (name == null || name.isEmpty) {
       return Response(400, body: 'Event type name required');
     }
 
-    await conn.execute('UPDATE event_types SET name = :name WHERE id = :id', {'name': name, 'id': id});
-    
-    final result = await conn.execute('SELECT * FROM event_types WHERE id = :id', {'id': id});
+    await conn.execute('UPDATE event_types SET name = :name WHERE id = :id',
+        {'name': name, 'id': id});
+
+    final result = await conn
+        .execute('SELECT * FROM event_types WHERE id = :id', {'id': id});
     if (result.rows.isEmpty) {
       return Response(404, body: 'Event type not found');
     }
-    
+
     // Log audit
     await _logAudit(
       conn,
@@ -1729,12 +1854,14 @@ Future<Response> _updateEventType(Request req, String id) async {
       oldValue: oldValue,
       newValue: {'name': name},
     );
-    
+
     stderr.writeln('✅ Updated event type id=$id name=$name');
-    return Response.ok(jsonEncode(result.rows.first.assoc()), headers: {'Content-Type': 'application/json'});
+    return Response.ok(jsonEncode(result.rows.first.assoc()),
+        headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ Error in _updateEventType: $e\n$st');
-    return Response.internalServerError(body: 'Failed to update event type: $e');
+    return Response.internalServerError(
+        body: 'Failed to update event type: $e');
   } finally {
     await conn?.close();
   }
@@ -1747,39 +1874,42 @@ Future<Response> _deleteEventType(Request req, String id) async {
   try {
     final authMemberId = _getMemberIdFromRequest(req);
     if (authMemberId == null) return Response(401, body: 'Unauthorized');
-    
+
     conn = await _connect();
-    
+
     // Check if user is admin or super
     final isAdmin = await _isAdmin(conn, authMemberId);
     final isSuper = await _isSuper(conn, authMemberId);
-    
+
     if (!isAdmin && !isSuper) {
       return Response(403, body: 'Admin access required');
     }
 
     // Get old value for audit
-    final oldRow = await conn.execute('SELECT * FROM event_types WHERE id = :id', {'id': id});
+    final oldRow = await conn
+        .execute('SELECT * FROM event_types WHERE id = :id', {'id': id});
     final oldValue = oldRow.rows.isNotEmpty ? oldRow.rows.first.assoc() : null;
 
     // Check if event type is in use
     final eventsCheck = await conn.execute(
-      'SELECT COUNT(*) as count FROM events WHERE event_type_id = :id',
-      {'id': id}
-    );
+        'SELECT COUNT(*) as count FROM events WHERE event_type_id = :id',
+        {'id': id});
     final countRow = eventsCheck.rows.first.assoc();
     final count = int.tryParse(countRow['count']?.toString() ?? '0') ?? 0;
-    
+
     if (count > 0) {
-      return Response(400, body: 'Cannot delete event type that is in use by $count event(s)');
+      return Response(400,
+          body: 'Cannot delete event type that is in use by $count event(s)');
     }
 
     // Delete associated role templates first (where event_id IS NULL)
-    await conn.execute('DELETE FROM roles WHERE event_type_id = :id AND event_id IS NULL', {'id': id});
-    
+    await conn.execute(
+        'DELETE FROM roles WHERE event_type_id = :id AND event_id IS NULL',
+        {'id': id});
+
     // Delete the event type
     await conn.execute('DELETE FROM event_types WHERE id = :id', {'id': id});
-    
+
     // Log audit
     await _logAudit(
       conn,
@@ -1789,12 +1919,13 @@ Future<Response> _deleteEventType(Request req, String id) async {
       changedByMemberId: authMemberId,
       oldValue: oldValue,
     );
-    
+
     stderr.writeln('✅ Deleted event type id=$id');
     return Response(204);
   } catch (e, st) {
     stderr.writeln('❌ Error in _deleteEventType: $e\n$st');
-    return Response.internalServerError(body: 'Failed to delete event type: $e');
+    return Response.internalServerError(
+        body: 'Failed to delete event type: $e');
   } finally {
     await conn?.close();
   }
@@ -1832,7 +1963,8 @@ Future<Response> _reportEvents(Request req) async {
       queryParams['clubId'] = clubIdParam;
     }
 
-    final whereClause = conditions.isEmpty ? '' : 'WHERE ${conditions.join(' AND ')}';
+    final whereClause =
+        conditions.isEmpty ? '' : 'WHERE ${conditions.join(' AND ')}';
 
     // Total events
     final totalRes = await conn.execute('''
@@ -1861,7 +1993,8 @@ Future<Response> _reportEvents(Request req) async {
       'by_type': byType,
     };
 
-    return Response.ok(jsonEncode(report), headers: {'Content-Type': 'application/json'});
+    return Response.ok(jsonEncode(report),
+        headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ Error in _reportEvents: $e\n$st');
     return Response.internalServerError(body: 'Error: $e');
@@ -1902,7 +2035,8 @@ Future<Response> _reportVolunteers(Request req) async {
       queryParams['clubId'] = clubIdParam;
     }
 
-    final whereClause = conditions.isEmpty ? '' : 'WHERE ${conditions.join(' AND ')}';
+    final whereClause =
+        conditions.isEmpty ? '' : 'WHERE ${conditions.join(' AND ')}';
 
     // Calculate total volunteer hours
     final hoursRes = await conn.execute('''
@@ -1915,8 +2049,10 @@ Future<Response> _reportVolunteers(Request req) async {
       JOIN events e ON r.event_id = e.id
       $whereClause
     ''', queryParams);
-    
-    final totalHours = double.tryParse(hoursRes.rows.first.assoc()['total_hours']?.toString() ?? '0') ?? 0.0;
+
+    final totalHours = double.tryParse(
+            hoursRes.rows.first.assoc()['total_hours']?.toString() ?? '0') ??
+        0.0;
 
     // Top volunteers by hours
     final topVolunteersRes = await conn.execute('''
@@ -1941,7 +2077,9 @@ Future<Response> _reportVolunteers(Request req) async {
       final row = r.assoc();
       return {
         'name': '${row['first_name']} ${row['last_name']}',
-        'hours': double.tryParse(row['hours']?.toString() ?? '0')?.toStringAsFixed(1) ?? '0.0',
+        'hours': double.tryParse(row['hours']?.toString() ?? '0')
+                ?.toStringAsFixed(1) ??
+            '0.0',
         'shifts': row['shifts'],
       };
     }).toList();
@@ -1951,7 +2089,8 @@ Future<Response> _reportVolunteers(Request req) async {
       'top_volunteers': topVolunteers,
     };
 
-    return Response.ok(jsonEncode(report), headers: {'Content-Type': 'application/json'});
+    return Response.ok(jsonEncode(report),
+        headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ Error in _reportVolunteers: $e\n$st');
     return Response.internalServerError(body: 'Error: $e');
@@ -1992,7 +2131,8 @@ Future<Response> _reportFillRates(Request req) async {
       queryParams['clubId'] = clubIdParam;
     }
 
-    final whereClause = conditions.isEmpty ? '' : 'WHERE ${conditions.join(' AND ')}';
+    final whereClause =
+        conditions.isEmpty ? '' : 'WHERE ${conditions.join(' AND ')}';
 
     // Overall fill rate
     final overallRes = await conn.execute('''
@@ -2034,7 +2174,7 @@ Future<Response> _reportFillRates(Request req) async {
       final total = int.parse(row['total_roles'] ?? '0');
       final filled = int.parse(row['filled_roles'] ?? '0');
       final fillRate = total > 0 ? filled / total : 0.0;
-      
+
       return {
         'event_id': row['event_id'],
         'event_type': row['event_type'],
@@ -2052,7 +2192,8 @@ Future<Response> _reportFillRates(Request req) async {
       'by_event': byEvent,
     };
 
-    return Response.ok(jsonEncode(report), headers: {'Content-Type': 'application/json'});
+    return Response.ok(jsonEncode(report),
+        headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ Error in _reportFillRates: $e\n$st');
     return Response.internalServerError(body: 'Error: $e');
@@ -2068,9 +2209,9 @@ Future<Response> _reportClubComparison(Request req) async {
   try {
     final authMemberId = _getMemberIdFromRequest(req);
     if (authMemberId == null) return Response(401, body: 'Unauthorized');
-    
+
     conn = await _connect();
-    
+
     // Check if user is super admin
     final isSuper = await _isSuper(conn, authMemberId);
     if (!isSuper) {
@@ -2102,7 +2243,7 @@ Future<Response> _reportClubComparison(Request req) async {
       LEFT JOIN events e ON lc.id = e.club_id 
         AND e.date BETWEEN :startDate AND :endDate
     ''';
-    
+
     final sqlParams = <String, dynamic>{
       'startDate': startDate,
       'endDate': endDate,
@@ -2137,64 +2278,81 @@ Future<Response> _reportClubComparison(Request req) async {
 // ---------------- Router & Server ----------------
 Handler _router() {
   final router = Router();
-  
+
   // ============ MEMBERS ROUTES ============
   router.post('/members', _createMember);
   router.get('/members', _members);
-  router.put('/members/<id>', (Request req, String id) => _updateMember(req, id));
-  router.delete('/members/<id>', (Request req, String id) => _deleteMember(req, id));
-  
+  router.put(
+      '/members/<id>', (Request req, String id) => _updateMember(req, id));
+  router.delete(
+      '/members/<id>', (Request req, String id) => _deleteMember(req, id));
+
   // ============ CLUBS ROUTES ============
   router.post('/clubs', _createClub);
   router.get('/clubs', _clubs);
   router.put('/clubs/<id>', (Request req, String id) => _updateClub(req, id));
-  router.delete('/clubs/<id>', (Request req, String id) => _deleteClub(req, id));
-  
+  router.delete(
+      '/clubs/<id>', (Request req, String id) => _deleteClub(req, id));
+
   // ============ EVENT TYPES & ROLE TEMPLATES ROUTES ============
   // IMPORTANT: More specific routes FIRST (with /role_templates path segment)
-  router.get('/event_types/<id>/role_templates', (Request req, String id) => _getRoleTemplates(req, id));
-  router.post('/event_types/<id>/role_templates', (Request req, String id) => _saveRoleTemplate(req, id));
-  router.delete('/role_templates/<id>', (Request req, String id) => _deleteRoleTemplate(req, id));
-  
+  router.get('/event_types/<id>/role_templates',
+      (Request req, String id) => _getRoleTemplates(req, id));
+  router.post('/event_types/<id>/role_templates',
+      (Request req, String id) => _saveRoleTemplate(req, id));
+  router.delete('/role_templates/<id>',
+      (Request req, String id) => _deleteRoleTemplate(req, id));
+
   // Then general event_types routes
   router.post('/event_types', _createEventType);
   router.get('/event_types', _eventTypes);
-  router.put('/event_types/<id>', (Request req, String id) => _updateEventType(req, id));
-  router.delete('/event_types/<id>', (Request req, String id) => _deleteEventType(req, id));
-  
+  router.put('/event_types/<id>',
+      (Request req, String id) => _updateEventType(req, id));
+  router.delete('/event_types/<id>',
+      (Request req, String id) => _deleteEventType(req, id));
+
   // ============ EVENTS ROUTES ============
   // IMPORTANT: Specific routes BEFORE parameterized routes
-  router.get('/events/calendar', _eventsCalendar); // ⬅️ MUST come before /events/<id>
+  router.get(
+      '/events/calendar', _eventsCalendar); // ⬅️ MUST come before /events/<id>
   router.post('/events', _createEvent);
   router.get('/events', _events);
-  
+
   // Event-specific routes (with <id> parameter)
-  router.get('/events/<id>', (Request req, String id) => _eventDetails(req, id));
+  router.get(
+      '/events/<id>', (Request req, String id) => _eventDetails(req, id));
   router.put('/events/<id>', (Request req, String id) => _updateEvent(req, id));
-  router.delete('/events/<id>', (Request req, String id) => _deleteEvent(req, id));
-  router.post('/events/<id>/notify', (Request req, String id) => _notifyEventMembers(req, id));
-  router.post('/events/<id>/volunteers', (Request req, String id) => _assignVolunteer(req, id));
-  router.post('/events/<id>/roles', (Request req, String id) => _addRoleToEvent(req, id));
-  
+  router.delete(
+      '/events/<id>', (Request req, String id) => _deleteEvent(req, id));
+  router.post('/events/<id>/notify',
+      (Request req, String id) => _notifyEventMembers(req, id));
+  router.post('/events/<id>/volunteers',
+      (Request req, String id) => _assignVolunteer(req, id));
+  router.post('/events/<id>/roles',
+      (Request req, String id) => _addRoleToEvent(req, id));
+
   // Multi-parameter routes (most specific)
-  router.delete('/events/<eventId>/volunteers/<roleId>', (Request req, String eventId, String roleId) => _unassignVolunteer(req, eventId, roleId));
-  
+  router.delete(
+      '/events/<eventId>/volunteers/<roleId>',
+      (Request req, String eventId, String roleId) =>
+          _unassignVolunteer(req, eventId, roleId));
+
   // ============ ROLES ROUTES ============
   router.put('/roles/<id>', (Request req, String id) => _updateRole(req, id));
-  router.delete('/roles/<id>', (Request req, String id) => _deleteRole(req, id));
-  
+  router.delete(
+      '/roles/<id>', (Request req, String id) => _deleteRole(req, id));
+
   // ============ REPORTS ROUTES ============
   router.get('/reports/events', _reportEvents);
   router.get('/reports/volunteers', _reportVolunteers);
   router.get('/reports/fill_rates', _reportFillRates);
   router.get('/reports/club_comparison', _reportClubComparison);
-  
+
   // ============ AUDIT LOGS ROUTE ============
   router.get('/audit_logs', _getAuditLogs);
-  
+
   return router;
 }
-
 
 Future<Response> _createMember(Request req) async {
   stderr.writeln('🔵 POST /members');
@@ -2211,11 +2369,12 @@ Future<Response> _createMember(Request req) async {
     final isAdmin = (bodyJson['is_admin'] == true) ? 1 : 0;
 
     if (name.isEmpty || clubId == null) {
-      return Response(400, body: 'Missing required fields: name, lions_club_id');
+      return Response(400,
+          body: 'Missing required fields: name, lions_club_id');
     }
 
     conn = await _connect();
-    
+
     // Capture params for reuse in audit log
     final params = {
       'name': name,
@@ -2224,7 +2383,7 @@ Future<Response> _createMember(Request req) async {
       'club': clubId.toString(),
       'admin': isAdmin
     };
-    
+
     await conn.execute('''
       INSERT INTO members (name, email, phone_number, lions_club_id, is_admin)
       VALUES (:name, :email, :phone, :club, :admin)
@@ -2243,8 +2402,9 @@ Future<Response> _createMember(Request req) async {
       changedByMemberId: authMemberId,
       newValue: params,
     );
-    
-    return Response.ok(jsonEncode({'id': newId.toString()}), headers: {'Content-Type': 'application/json'});
+
+    return Response.ok(jsonEncode({'id': newId.toString()}),
+        headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ Error in _createMember: $e\n$st');
     return Response.internalServerError(body: 'Error: $e');
@@ -2252,7 +2412,6 @@ Future<Response> _createMember(Request req) async {
     await conn?.close();
   }
 }
-
 
 Future<Response> _updateMember(Request req, String idStr) async {
   stderr.writeln('🔵 PUT /members/$idStr');
@@ -2264,22 +2423,27 @@ Future<Response> _updateMember(Request req, String idStr) async {
   MySQLConnection? conn;
   try {
     conn = await _connect();
-    
+
     // Get requesting member info
     final authMemberId = _getMemberIdFromRequest(req);
-    final isSuper = authMemberId != null ? await _isSuper(conn, authMemberId) : false;
-    final isAdmin = authMemberId != null ? await _isAdmin(conn, authMemberId) : false;
+    final isSuper =
+        authMemberId != null ? await _isSuper(conn, authMemberId) : false;
+    final isAdmin =
+        authMemberId != null ? await _isAdmin(conn, authMemberId) : false;
     final isSelf = authMemberId == id;
 
-    stderr.writeln('DEBUG: updateMember authMemberId=$authMemberId isSuper=$isSuper isAdmin=$isAdmin isSelf=$isSelf targetId=$id');
+    stderr.writeln(
+        'DEBUG: updateMember authMemberId=$authMemberId isSuper=$isSuper isAdmin=$isAdmin isSelf=$isSelf targetId=$id');
 
     // Authorization: must be admin, super, or updating own profile
     if (!isAdmin && !isSuper && !isSelf) {
-      return Response.forbidden('Admin access required or edit own profile only');
+      return Response.forbidden(
+          'Admin access required or edit own profile only');
     }
 
     // Fetch old value BEFORE update for audit log
-    final oldRow = await conn.execute('SELECT * FROM members WHERE id = :id', {'id': id});
+    final oldRow =
+        await conn.execute('SELECT * FROM members WHERE id = :id', {'id': id});
     final oldValue = oldRow.rows.isNotEmpty ? oldRow.rows.first.assoc() : null;
 
     final body = await req.readAsString();
@@ -2288,7 +2452,7 @@ Future<Response> _updateMember(Request req, String idStr) async {
     // Build update query based on permissions
     final updates = <String>[];
     final params = <String, dynamic>{};
-    
+
     // All users can update these fields
     if (data.containsKey('name')) {
       updates.add('name = :name');
@@ -2311,7 +2475,8 @@ Future<Response> _updateMember(Request req, String idStr) async {
       }
       if (data.containsKey('is_admin')) {
         updates.add('is_admin = :isAdmin');
-        params['isAdmin'] = data['is_admin'] == 1 || data['is_admin'] == true ? 1 : 0;
+        params['isAdmin'] =
+            data['is_admin'] == 1 || data['is_admin'] == true ? 1 : 0;
       }
     }
 
@@ -2321,11 +2486,11 @@ Future<Response> _updateMember(Request req, String idStr) async {
 
     params['id'] = id;
     final sql = 'UPDATE members SET ${updates.join(', ')} WHERE id = :id';
-    
+
     stderr.writeln('DEBUG: updateMember SQL=$sql params=$params');
-    
+
     await conn.execute(sql, params);
-    
+
     // Log audit
     await _logAudit(
       conn,
@@ -2336,7 +2501,7 @@ Future<Response> _updateMember(Request req, String idStr) async {
       oldValue: oldValue,
       newValue: params,
     );
-    
+
     return Response.ok(json.encode({'message': 'Member updated'}));
   } catch (e, st) {
     stderr.writeln('❌ Error in _updateMember: $e\n$st');
@@ -2356,13 +2521,14 @@ Future<Response> _deleteMember(Request req, String idStr) async {
   MySQLConnection? conn;
   try {
     conn = await _connect();
-    
+
     // Fetch old value BEFORE delete for audit log
-    final oldRow = await conn.execute('SELECT * FROM members WHERE id = :id', {'id': id});
+    final oldRow =
+        await conn.execute('SELECT * FROM members WHERE id = :id', {'id': id});
     final oldValue = oldRow.rows.isNotEmpty ? oldRow.rows.first.assoc() : null;
-    
+
     await conn.execute('DELETE FROM members WHERE id = :id', {'id': id});
-    
+
     // Log audit
     final authMemberId = _getMemberIdFromRequest(req);
     await _logAudit(
@@ -2373,7 +2539,7 @@ Future<Response> _deleteMember(Request req, String idStr) async {
       changedByMemberId: authMemberId,
       oldValue: oldValue,
     );
-    
+
     return Response(204);
   } catch (e, st) {
     stderr.writeln('❌ Error in _deleteMember: $e\n$st');
@@ -2401,13 +2567,15 @@ Middleware _handleOptions = (Handler innerHandler) {
 // ...existing code...
 void main(List<String> args) async {
   final ip = InternetAddress.anyIPv4;
-  
+
   // ✅ UPDATED: Handle OPTIONS requests BEFORE the router
   final handler = Pipeline()
       .addMiddleware(shelf_cors.corsHeaders(headers: {
         shelf_cors.ACCESS_CONTROL_ALLOW_ORIGIN: '*',
-        shelf_cors.ACCESS_CONTROL_ALLOW_METHODS: 'GET, POST, PUT, DELETE, OPTIONS',
-        shelf_cors.ACCESS_CONTROL_ALLOW_HEADERS: 'Origin, Content-Type, X-Member-Id',
+        shelf_cors.ACCESS_CONTROL_ALLOW_METHODS:
+            'GET, POST, PUT, DELETE, OPTIONS',
+        shelf_cors.ACCESS_CONTROL_ALLOW_HEADERS:
+            'Origin, Content-Type, X-Member-Id',
       }))
       //.addMiddleware(logRequests())
       .addMiddleware(_handleOptions) // ✅ ADD THIS LINE
@@ -2417,4 +2585,3 @@ void main(List<String> args) async {
   final server = await io.serve(handler, ip, port);
   print('Server listening on port ${server.port}');
 }
-
