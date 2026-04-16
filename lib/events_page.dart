@@ -31,10 +31,10 @@ class _EventsPageState extends State<EventsPage> {
   int? _userClubId;
   bool _isAdmin = false;
 
-   // Filter state
+  // Filter state
   int? _filterEventTypeId; // null = "All Types"
   String? _filterDateRange; // null = "All Dates", "today", "week", "month"
-  
+
   // Same helper as MembersPage
   int? _toInt(dynamic v) {
     if (v == null) return null;
@@ -43,8 +43,8 @@ class _EventsPageState extends State<EventsPage> {
     if (v is String) return int.tryParse(v);
     return null;
   }
-  
-    // ---- Email preview helpers (adapted from EventDetailPage) ----
+
+  // ---- Email preview helpers (adapted from EventDetailPage) ----
   String _escapeHtml(String s) => s
       .replaceAll('&', '&amp;')
       .replaceAll('<', '&lt;')
@@ -110,85 +110,147 @@ class _EventsPageState extends State<EventsPage> {
       if (openEnd >= 0) {
         final bodyClose = lower.indexOf('</body>', openEnd + 1);
         if (bodyClose > openEnd) {
-          return original.substring(0, openEnd + 1) + fragment + original.substring(bodyClose);
+          return original.substring(0, openEnd + 1) +
+              fragment +
+              original.substring(bodyClose);
         }
       }
     }
     return fragment;
   }
 
-  String _patchNotesAndRoles(String html, {required String notes, required List roles}) {
-    var out = html.replaceAll(RegExp(r'{{\s*notes\s*}}', caseSensitive: false), _escapeHtml(notes));
+  String _patchNotesAndRoles(
+    String html, {
+    required String notes,
+    required List roles,
+  }) {
+    var out = html.replaceAll(
+      RegExp(r'{{\s*notes\s*}}', caseSensitive: false),
+      _escapeHtml(notes),
+    );
     final rolesTable = _buildRolesTableHtml(roles);
-    out = out.replaceAll(RegExp(r'{{\s*roles_html\s*}}', caseSensitive: false), rolesTable);
     out = out.replaceAll(
-        RegExp(r'<ul[^>]*>\s*<li[^>]*>\s*{{\s*roles_html\s*}}\s*</li>\s*</ul>', caseSensitive: false, dotAll: true),
-        rolesTable);
+      RegExp(r'{{\s*roles_html\s*}}', caseSensitive: false),
+      rolesTable,
+    );
+    out = out.replaceAll(
+      RegExp(
+        r'<ul[^>]*>\s*<li[^>]*>\s*{{\s*roles_html\s*}}\s*</li>\s*</ul>',
+        caseSensitive: false,
+        dotAll: true,
+      ),
+      rolesTable,
+    );
     out = out.replaceAllMapped(
-        RegExp(r'(<h[23][^>]*>\s*Volunteer Roles\s*:?<\/h[23]>\s*)(?:<ul[^>]*>[\s\S]*?<\/ul>|<ol[^>]*>[\s\S]*?<\/ol>)',
-            caseSensitive: false),
-        (m) => '${m.group(1)}$rolesTable');
+      RegExp(
+        r'(<h[23][^>]*>\s*Volunteer Roles\s*:?<\/h[23]>\s*)(?:<ul[^>]*>[\s\S]*?<\/ul>|<ol[^>]*>[\s\S]*?<\/ol>)',
+        caseSensitive: false,
+      ),
+      (m) => '${m.group(1)}$rolesTable',
+    );
     return out;
   }
 
   /// Show email preview + editor, then send new‑event notification.
   Future<void> _composeAndSendNewEventEmail(int eventId) async {
-    debugPrint('DEBUG: EventsPage _composeAndSendNewEventEmail -> START eventId=$eventId');
-      // Load event detail (to patch notes/roles).
+    debugPrint(
+      'DEBUG: EventsPage _composeAndSendNewEventEmail -> START eventId=$eventId',
+    );
+    // Load event detail (to patch notes/roles).
     http.Response detail;
     try {
-      debugPrint('DEBUG: EventsPage _composeAndSendNewEventEmail -> fetching event details');
+      debugPrint(
+        'DEBUG: EventsPage _composeAndSendNewEventEmail -> fetching event details',
+      );
       detail = await http.get(Uri.parse('$apiBase/events/$eventId'));
-      debugPrint('DEBUG: EventsPage _composeAndSendNewEventEmail -> event detail status=${detail.statusCode}');
-      debugPrint('DEBUG: EventsPage _composeAndSendNewEventEmail -> event detail body=${detail.body}');
+      debugPrint(
+        'DEBUG: EventsPage _composeAndSendNewEventEmail -> event detail status=${detail.statusCode}',
+      );
+      debugPrint(
+        'DEBUG: EventsPage _composeAndSendNewEventEmail -> event detail body=${detail.body}',
+      );
     } catch (e) {
-      debugPrint('ERROR: EventsPage _composeAndSendNewEventEmail -> event fetch failed: $e');
+      debugPrint(
+        'ERROR: EventsPage _composeAndSendNewEventEmail -> event fetch failed: $e',
+      );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Event load failed: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Event load failed: $e')));
       return;
     }
     if (detail.statusCode != 200) {
-      debugPrint('ERROR: EventsPage _composeAndSendNewEventEmail -> event detail failed: ${detail.body}');
+      debugPrint(
+        'ERROR: EventsPage _composeAndSendNewEventEmail -> event detail failed: ${detail.body}',
+      );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Event load failed: ${detail.body}')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Event load failed: ${detail.body}')),
+      );
       return;
     }
     final parsed = json.decode(detail.body) as Map<String, dynamic>;
     final event = parsed['event'] as Map<String, dynamic>;
     final roles = (parsed['roles'] as List?) ?? [];
-    debugPrint('DEBUG: EventsPage _composeAndSendNewEventEmail -> parsed event, roles.length=${roles.length}');
+    debugPrint(
+      'DEBUG: EventsPage _composeAndSendNewEventEmail -> parsed event, roles.length=${roles.length}',
+    );
     // Dry run to get template.
     http.Response preview;
     try {
-      debugPrint('DEBUG: EventsPage _composeAndSendNewEventEmail -> fetching preview (dry_run)');
+      debugPrint(
+        'DEBUG: EventsPage _composeAndSendNewEventEmail -> fetching preview (dry_run)',
+      );
       preview = await http.post(
         Uri.parse('$apiBase/events/$eventId/notify'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({'dry_run': true}),
       );
-       debugPrint('DEBUG: EventsPage _composeAndSendNewEventEmail -> preview status=${preview.statusCode}');
-       debugPrint('DEBUG: EventsPage _composeAndSendNewEventEmail -> preview body=${preview.body}');  // ⬅️ ADD THIS LINE
+      debugPrint(
+        'DEBUG: EventsPage _composeAndSendNewEventEmail -> preview status=${preview.statusCode}',
+      );
+      debugPrint(
+        'DEBUG: EventsPage _composeAndSendNewEventEmail -> preview body=${preview.body}',
+      ); // ⬅️ ADD THIS LINE
     } catch (e) {
-      debugPrint('ERROR: EventsPage _composeAndSendNewEventEmail -> preview fetch failed: $e');
+      debugPrint(
+        'ERROR: EventsPage _composeAndSendNewEventEmail -> preview fetch failed: $e',
+      );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Preview failed: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Preview failed: $e')));
       return;
     }
     if (preview.statusCode != 200) {
-      debugPrint('ERROR: EventsPage _composeAndSendNewEventEmail -> preview failed: ${preview.body}');
+      debugPrint(
+        'ERROR: EventsPage _composeAndSendNewEventEmail -> preview failed: ${preview.body}',
+      );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Preview failed: ${preview.body}')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Preview failed: ${preview.body}')),
+      );
       return;
     }
     final data = json.decode(preview.body) as Map<String, dynamic>;
-     debugPrint('DEBUG: EventsPage _composeAndSendNewEventEmail -> preview data keys=${data.keys}');
-    final subjectCtrl = TextEditingController(text: (data['subject'] ?? '').toString());
+    debugPrint(
+      'DEBUG: EventsPage _composeAndSendNewEventEmail -> preview data keys=${data.keys}',
+    );
+    final subjectCtrl = TextEditingController(
+      text: (data['subject'] ?? '').toString(),
+    );
     String bodyHtml = (data['body_html'] ?? '').toString();
-    bodyHtml = _patchNotesAndRoles(bodyHtml, notes: event['notes']?.toString() ?? '', roles: roles);
+    bodyHtml = _patchNotesAndRoles(
+      bodyHtml,
+      notes: event['notes']?.toString() ?? '',
+      roles: roles,
+    );
     final editorCtrl = EmailHtmlEditorController();
     final editable = _extractBodyHtml(bodyHtml);
     String previewHtml = bodyHtml;
-    debugPrint('DEBUG: EventsPage _composeAndSendNewEventEmail -> showing preview dialog');
+    debugPrint(
+      'DEBUG: EventsPage _composeAndSendNewEventEmail -> showing preview dialog',
+    );
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) {
@@ -207,31 +269,53 @@ class _EventsPageState extends State<EventsPage> {
                   width: 820,
                   child: Column(
                     children: [
-                      TextField(controller: subjectCtrl, decoration: const InputDecoration(labelText: 'Subject')),
+                      TextField(
+                        controller: subjectCtrl,
+                        decoration: const InputDecoration(labelText: 'Subject'),
+                      ),
                       const SizedBox(height: 12),
-                      TabBar(tabs: const [Tab(text: 'Preview'), Tab(text: 'Edit')], onTap: (i) async {
-                        if (i == 1 && !showEditor) {
-                          Future.delayed(const Duration(milliseconds: 10),
-                              () => setDialogState(() => showEditor = true));
-                        }
-                        if (i == 0) {
-                          final edited = (await editorCtrl.getHtml()).trim();
-                          final merged = _mergeIntoBody(bodyHtml, edited.isEmpty ? editable : edited);
-                          setDialogState(() => previewHtml = merged);
-                        }
-                      }),
+                      TabBar(
+                        tabs: const [
+                          Tab(text: 'Preview'),
+                          Tab(text: 'Edit'),
+                        ],
+                        onTap: (i) async {
+                          if (i == 1 && !showEditor) {
+                            Future.delayed(
+                              const Duration(milliseconds: 10),
+                              () => setDialogState(() => showEditor = true),
+                            );
+                          }
+                          if (i == 0) {
+                            final edited = (await editorCtrl.getHtml()).trim();
+                            final merged = _mergeIntoBody(
+                              bodyHtml,
+                              edited.isEmpty ? editable : edited,
+                            );
+                            setDialogState(() => previewHtml = merged);
+                          }
+                        },
+                      ),
                       Expanded(
                         child: TabBarView(
                           physics: const NeverScrollableScrollPhysics(),
                           children: [
                             Padding(
                               padding: const EdgeInsets.all(8),
-                              child: SingleChildScrollView(child: HtmlWidget(previewHtml)),
+                              child: SingleChildScrollView(
+                                child: HtmlWidget(previewHtml),
+                              ),
                             ),
                             Builder(
                               builder: (_) {
-                                if (!showEditor) return const Center(child: CircularProgressIndicator());
-                                return EmailHtmlEditor(controller: editorCtrl, initialHtml: editable);
+                                if (!showEditor)
+                                  return const Center(
+                                    child: CircularProgressIndicator(),
+                                  );
+                                return EmailHtmlEditor(
+                                  controller: editorCtrl,
+                                  initialHtml: editable,
+                                );
                               },
                             ),
                           ],
@@ -242,8 +326,14 @@ class _EventsPageState extends State<EventsPage> {
                 ),
               ),
               actions: [
-                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Send')),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Send'),
+                ),
               ],
             ),
           ),
@@ -252,28 +342,42 @@ class _EventsPageState extends State<EventsPage> {
     );
     if (ok != true) return;
     final editedHtml = (await editorCtrl.getHtml()).trim();
-    final mergedHtml = _mergeIntoBody(bodyHtml, editedHtml.isEmpty ? editable : editedHtml);
+    final mergedHtml = _mergeIntoBody(
+      bodyHtml,
+      editedHtml.isEmpty ? editable : editedHtml,
+    );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sending new event email...')));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Sending new event email...')));
     try {
       final sendRes = await http.post(
         Uri.parse('$apiBase/events/$eventId/notify'),
         headers: {'Content-Type': 'application/json'},
-        body: json.encode({'subject': subjectCtrl.text.trim(), 'body_html': mergedHtml}),
+        body: json.encode({
+          'subject': subjectCtrl.text.trim(),
+          'body_html': mergedHtml,
+        }),
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(sendRes.statusCode == 200
-              ? 'New event email sent.'
-              : 'Send failed (${sendRes.statusCode}): ${sendRes.body}')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            sendRes.statusCode == 200
+                ? 'New event email sent.'
+                : 'Send failed (${sendRes.statusCode}): ${sendRes.body}',
+          ),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Send error: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Send error: $e')));
     }
   }
-
 
   @override
   void initState() {
@@ -290,7 +394,6 @@ class _EventsPageState extends State<EventsPage> {
     _load(); // do not setState here; _load() handles it
   }
 
-
   Future<void> _load() async {
     setState(() {
       _loading = true;
@@ -302,10 +405,14 @@ class _EventsPageState extends State<EventsPage> {
       // Build query params for server-side filtering
       final params = <String, String>{};
       if (_userClubId != null) params['club_id'] = _userClubId!.toString();
-      if (_filterEventTypeId != null) params['type_id'] = _filterEventTypeId!.toString();
-      if (_filterDateRange != null) params['date_range'] = _filterDateRange!; // today|week|month
+      if (_filterEventTypeId != null)
+        params['type_id'] = _filterEventTypeId!.toString();
+      if (_filterDateRange != null)
+        params['date_range'] = _filterDateRange!; // today|week|month
 
-      final qs = params.entries.map((e) => '${e.key}=${Uri.encodeComponent(e.value)}').join('&');
+      final qs = params.entries
+          .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+          .join('&');
       final path = qs.isEmpty ? '/events' : '/events?$qs';
 
       // IMPORTANT: call ApiClient with the path that includes query params
@@ -313,41 +420,40 @@ class _EventsPageState extends State<EventsPage> {
       debugPrint('DEBUG: EventsPage _load status=${res.statusCode} path=$path');
 
       //final url = _userClubId == null
-        //  ? '$apiBase/events'
-          //: '$apiBase/events?club_id=$_userClubId';
+      //  ? '$apiBase/events'
+      //: '$apiBase/events?club_id=$_userClubId';
       // ApiClient will add x-member-id header automatically
       // Server-side filtering now happens based on that header
       //final res = await ApiClient.get('/events');
       debugPrint('DEBUG: EventsPage _load status=${res.statusCode}');
       if (res.statusCode == 200) {
-      var events = (json.decode(res.body) as List);
-      
-      
+        var events = (json.decode(res.body) as List);
+
+        setState(() {
+          _events = events;
+          _loading = false;
+        });
+      } else {
+        setState(() {
+          _error = 'Failed to load events: ${res.statusCode}';
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('ERROR: EventsPage _load -> $e');
       setState(() {
-        _events = events;
-        _loading = false;
-      });
-    } else {
-      setState(() {
-        _error = 'Failed to load events: ${res.statusCode}';
+        _error = 'Error: $e';
         _loading = false;
       });
     }
-  } catch (e) {
-    debugPrint('ERROR: EventsPage _load -> $e');
-    setState(() {
-      _error = 'Error: $e';
-      _loading = false;
-    });
   }
-}
 
   Future<void> _loadEventTypes() async {
     debugPrint('DEBUG: EventsPage _loadEventTypes');
     final res = await http.get(Uri.parse('$apiBase/event_types'));
     if (res.statusCode == 200) {
       final list = (json.decode(res.body) as List).cast<Map<String, dynamic>>();
-    setState(() => _eventTypes = list);
+      setState(() => _eventTypes = list);
     } else {
       debugPrint('ERROR: EventsPage _loadEventTypes status=${res.statusCode}');
     }
@@ -363,48 +469,60 @@ class _EventsPageState extends State<EventsPage> {
     }
   }
 
-  
   // ...existing code...
   // Direct send removed; EventDetailPage handles preview + send.
   Future<void> _openCreateEventDialog() async {
     await _loadEventTypes();
     await _loadClubs();
-    
-      // SIMPLIFIED: Remove the local variable, just pass true directly
-  debugPrint('DEBUG: EventsPage _openCreateEventDialog -> showing dialog with defaultSendEmails=true');
-  final result = await showCreateEventDialog(
-    context,
-    showSendEmailsToggle: true,
-    defaultSendEmails: true, // ✅ Direct value instead of variable
-    userClubId: _userClubId,
-  );
-  debugPrint('DEBUG: EventsPage _openCreateEventDialog -> result=$result');
-  if (result == null) return;
 
-  // Extract eventId and sendEmails from result
-  final eventIdStr = result.eventId;
-  final sendEmails = result.sendEmails;
-  debugPrint('DEBUG: EventsPage _openCreateEventDialog -> eventId=$eventIdStr sendEmails=$sendEmails');
-  
-  if (eventIdStr.isEmpty) return;
-  
-  final eventId = int.parse(eventIdStr);
-  debugPrint('DEBUG: EventsPage _openCreateEventDialog -> parsed eventId=$eventId, checking sendEmails=$sendEmails mounted=$mounted');
-  if (sendEmails && mounted) {
-     debugPrint('DEBUG: EventsPage _openCreateEventDialog -> calling _composeAndSendNewEventEmail');
-    await _composeAndSendNewEventEmail(eventId);
-  }
-  debugPrint('DEBUG: EventsPage _openCreateEventDialog -> navigating to EventDetailPage');
-  if (mounted) {
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => EventDetailPage(eventId: eventId)));
-  }
-}
+    // SIMPLIFIED: Remove the local variable, just pass true directly
+    debugPrint(
+      'DEBUG: EventsPage _openCreateEventDialog -> showing dialog with defaultSendEmails=true',
+    );
+    final result = await showCreateEventDialog(
+      context,
+      showSendEmailsToggle: true,
+      defaultSendEmails: true, // ✅ Direct value instead of variable
+      userClubId: _userClubId,
+    );
+    debugPrint('DEBUG: EventsPage _openCreateEventDialog -> result=$result');
+    if (result == null) return;
 
-    
-// ...existing code...
+    // Extract eventId and sendEmails from result
+    final eventIdStr = result.eventId;
+    final sendEmails = result.sendEmails;
+    debugPrint(
+      'DEBUG: EventsPage _openCreateEventDialog -> eventId=$eventIdStr sendEmails=$sendEmails',
+    );
+
+    if (eventIdStr.isEmpty) return;
+
+    final eventId = int.parse(eventIdStr);
+    debugPrint(
+      'DEBUG: EventsPage _openCreateEventDialog -> parsed eventId=$eventId, checking sendEmails=$sendEmails mounted=$mounted',
+    );
+    if (sendEmails && mounted) {
+      debugPrint(
+        'DEBUG: EventsPage _openCreateEventDialog -> calling _composeAndSendNewEventEmail',
+      );
+      await _composeAndSendNewEventEmail(eventId);
+    }
+    debugPrint(
+      'DEBUG: EventsPage _openCreateEventDialog -> navigating to EventDetailPage',
+    );
+    if (mounted) {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => EventDetailPage(eventId: eventId)),
+      );
+    }
+  }
+
+  // ...existing code...
   Future<void> _openEditEventDialog(Map<String, dynamic> event) async {
     if (!_isAdmin) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Admin access required')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Admin access required')));
       return;
     }
 
@@ -416,9 +534,15 @@ class _EventsPageState extends State<EventsPage> {
     int? clubId = _toInt(event['club_id'] ?? event['lions_club_id']);
     DateTime? date = event['date'] != null
         ? DateTime.tryParse(event['date'].toString())
-        : (event['event_date'] != null ? DateTime.tryParse(event['event_date'].toString()) : null);
-    final locationCtrl = TextEditingController(text: event['location']?.toString() ?? '');
-    final notesCtrl = TextEditingController(text: event['notes']?.toString() ?? '');
+        : (event['event_date'] != null
+              ? DateTime.tryParse(event['event_date'].toString())
+              : null);
+    final locationCtrl = TextEditingController(
+      text: event['location']?.toString() ?? '',
+    );
+    final notesCtrl = TextEditingController(
+      text: event['notes']?.toString() ?? '',
+    );
 
     final ok = await showDialog<bool>(
       context: context,
@@ -439,7 +563,9 @@ class _EventsPageState extends State<EventsPage> {
                         if (id == null) return null;
                         return DropdownMenuItem<int>(
                           value: id,
-                          child: Text(et['name']?.toString() ?? et['id'].toString()),
+                          child: Text(
+                            et['name']?.toString() ?? et['id'].toString(),
+                          ),
                         );
                       })
                       .whereType<DropdownMenuItem<int>>()
@@ -456,7 +582,9 @@ class _EventsPageState extends State<EventsPage> {
                         if (id == null) return null;
                         return DropdownMenuItem<int>(
                           value: id,
-                          child: Text(c['name']?.toString() ?? c['id'].toString()),
+                          child: Text(
+                            c['name']?.toString() ?? c['id'].toString(),
+                          ),
                         );
                       })
                       .whereType<DropdownMenuItem<int>>()
@@ -465,7 +593,11 @@ class _EventsPageState extends State<EventsPage> {
                 ),
                 const SizedBox(height: 8),
                 ListTile(
-                  title: Text(date == null ? 'Select Date' : date.toString().split(' ')[0]),
+                  title: Text(
+                    date == null
+                        ? 'Select Date'
+                        : date.toString().split(' ')[0],
+                  ),
                   trailing: const Icon(Icons.calendar_today),
                   onTap: () async {
                     final picked = await showDatePicker(
@@ -485,24 +617,33 @@ class _EventsPageState extends State<EventsPage> {
                 TextField(
                   controller: notesCtrl,
                   maxLines: 3,
-                  decoration: const InputDecoration(labelText: 'Notes (optional)'),
+                  decoration: const InputDecoration(
+                    labelText: 'Notes (optional)',
+                  ),
                 ),
               ],
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Save'),
+            ),
           ],
         ),
       ),
     );
 
-    if (ok != true || eventTypeId == null || clubId == null || date == null) return;
+    if (ok != true || eventTypeId == null || clubId == null || date == null)
+      return;
 
     final d = date!;
     final eventDate = _fmtYmd(d);
-    
+
     final put = await http.put(
       Uri.parse('$apiBase/events/${event['id']}'),
       headers: {'Content-Type': 'application/json'},
@@ -519,9 +660,13 @@ class _EventsPageState extends State<EventsPage> {
 
     if (put.statusCode == 200) {
       await _load();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Event updated')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Event updated')));
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: ${put.body}')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed: ${put.body}')));
     }
   }
 
@@ -530,9 +675,14 @@ class _EventsPageState extends State<EventsPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Event?'),
-        content: const Text('This will remove the event and all volunteer assignments.'),
+        content: const Text(
+          'This will remove the event and all volunteer assignments.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(ctx, true),
@@ -545,253 +695,370 @@ class _EventsPageState extends State<EventsPage> {
     if (ok != true) return;
 
     final url = '$apiBase/events/$eventId';
-    debugPrint('DEBUG: EventsPage delete eventId=$eventId apiBase=$apiBase url=$url');
+    debugPrint(
+      'DEBUG: EventsPage delete eventId=$eventId apiBase=$apiBase url=$url',
+    );
     try {
       final res = await http.delete(Uri.parse(url));
-      debugPrint('DEBUG: EventsPage delete response status=${res.statusCode} body=${res.body}');
+      debugPrint(
+        'DEBUG: EventsPage delete response status=${res.statusCode} body=${res.body}',
+      );
       if (!mounted) return;
 
       if (res.statusCode == 200 || res.statusCode == 204) {
         await _load();
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Event deleted')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Event deleted')));
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: ${res.statusCode} ${res.body}')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed: ${res.statusCode} ${res.body}')),
+        );
       }
     } catch (e, st) {
       debugPrint('ERROR: _deleteEvent exception: $e\n$st');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete error: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Delete error: $e')));
     }
   }
 
-@override
-Widget build(BuildContext context) {
-  print('DEBUG: EventsPage build');
-  return Scaffold(
-    appBar: AppBar(
-      title: const Text('Events'),
-      backgroundColor: Colors.red,
-      actions: [
-        // NEW: Event Type Management button (admin/super only)
-        FutureBuilder<bool>(
-          future: Future.wait([AuthStore.isAdmin(), AuthStore.isSuper()])
-              .then((results) => results[0] || results[1]),
-          builder: (context, snapshot) {
-            if (snapshot.data != true) return const SizedBox.shrink();
-            return IconButton(
-              icon: const Icon(Icons.settings),
-              tooltip: 'Manage Event Types & Templates',
-              onPressed: () async {
-                final prefs = await SharedPreferences.getInstance();
-                final memberId = prefs.getInt('member_id') ?? 0;
-                if (!mounted) return;
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => EventTypeManagementPage(memberId: memberId),
+  @override
+  Widget build(BuildContext context) {
+    print('DEBUG: EventsPage build');
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Events'),
+        backgroundColor: Colors.red,
+        actions: [
+          // NEW: Event Type Management button (admin/super only)
+          FutureBuilder<bool>(
+            future: Future.wait([
+              AuthStore.isAdmin(),
+              AuthStore.isSuper(),
+            ]).then((results) => results[0] || results[1]),
+            builder: (context, snapshot) {
+              if (snapshot.data != true) return const SizedBox.shrink();
+              return IconButton(
+                icon: const Icon(Icons.settings),
+                tooltip: 'Manage Event Types & Templates',
+                onPressed: () async {
+                  final prefs = await SharedPreferences.getInstance();
+                  final memberId = prefs.getInt('member_id') ?? 0;
+                  if (!mounted) return;
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          EventTypeManagementPage(memberId: memberId),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+          ? Center(
+              child: Text(_error!, style: const TextStyle(color: Colors.red)),
+            )
+          : Column(
+              children: [
+                // Filter Row
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12.0,
+                    vertical: 12.0,
                   ),
-                );
-              },
-            );
-          },
-        ),
-        IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
-      ],
-    ),
-    body: _loading
-        ? const Center(child: CircularProgressIndicator())
-        : _error != null
-            ? Center(child: Text(_error!, style: const TextStyle(color: Colors.red)))
-            : Column(
-                children: [
-                  // Filter Row - FIXED: Remove Card, add generous padding
-                  Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal, // ✅ Mobile fix stays
-                      child: Row(
-                        children: [
-                          // Event Type Filter
-                          SizedBox(
-                            width: 220, // ✅ Back to comfortable width
-                            child: DropdownButtonFormField<int?>(
-                              value: _filterEventTypeId,
-                              decoration: const InputDecoration(
-                                hintText: 'Event Type',
-                                border: OutlineInputBorder(),
-                                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      // Event Type Filter
+                      SizedBox(
+                        width: 170,
+                        child: DropdownButtonFormField<int?>(
+                          value: _filterEventTypeId,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            hintText: 'Event Type',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 10,
+                            ),
+                          ),
+                          style: const TextStyle(
+                            color: Colors.black,
+                            decoration: TextDecoration.none,
+                            fontSize: 14,
+                          ),
+                          items: [
+                            const DropdownMenuItem<int?>(
+                              value: null,
+                              child: Text(
+                                'All Types',
+                                style: TextStyle(
+                                  decoration: TextDecoration.none,
+                                ),
                               ),
-                              style: const TextStyle(
-                                color: Colors.black,
-                                decoration: TextDecoration.none,
-                                fontSize: 14,
+                            ),
+                            ..._eventTypes.map(
+                              (et) => DropdownMenuItem<int?>(
+                                value: _toInt(et['id']),
+                                child: Text(
+                                  et['name']?.toString() ?? '',
+                                  style: const TextStyle(
+                                    decoration: TextDecoration.none,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
-                              items: [
-                                const DropdownMenuItem<int?>(
-                                  value: null,
-                                  child: Text(
-                                    'All Types',
-                                    style: TextStyle(decoration: TextDecoration.none),
+                            ),
+                          ],
+                          onChanged: (val) {
+                            setState(() => _filterEventTypeId = val);
+                            _load();
+                          },
+                        ),
+                      ),
+                      // Date Range Filter
+                      SizedBox(
+                        width: 150,
+                        child: DropdownButtonFormField<String?>(
+                          value: _filterDateRange,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            hintText: 'Date Range',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 10,
+                            ),
+                          ),
+                          style: const TextStyle(
+                            color: Colors.black,
+                            decoration: TextDecoration.none,
+                            fontSize: 14,
+                          ),
+                          items: const [
+                            DropdownMenuItem<String?>(
+                              value: null,
+                              child: Text(
+                                'All Dates',
+                                style: TextStyle(
+                                  decoration: TextDecoration.none,
+                                ),
+                              ),
+                            ),
+                            DropdownMenuItem<String?>(
+                              value: 'today',
+                              child: Text(
+                                'Today',
+                                style: TextStyle(
+                                  decoration: TextDecoration.none,
+                                ),
+                              ),
+                            ),
+                            DropdownMenuItem<String?>(
+                              value: 'week',
+                              child: Text(
+                                'Next 7 Days',
+                                style: TextStyle(
+                                  decoration: TextDecoration.none,
+                                ),
+                              ),
+                            ),
+                            DropdownMenuItem<String?>(
+                              value: 'month',
+                              child: Text(
+                                'Next 30 Days',
+                                style: TextStyle(
+                                  decoration: TextDecoration.none,
+                                ),
+                              ),
+                            ),
+                          ],
+                          onChanged: (val) {
+                            setState(() => _filterDateRange = val);
+                            _load();
+                          },
+                        ),
+                      ),
+                      // Clear Filters Button
+                      ElevatedButton(
+                        onPressed: () {
+                          setState(() {
+                            _filterEventTypeId = null;
+                            _filterDateRange = null;
+                          });
+                          _load();
+                        },
+                        child: const Text('Clear Filters'),
+                      ),
+                    ],
+                  ),
+                ),
+                // Table
+                Expanded(
+                  child: _events.isEmpty
+                      ? const Center(child: Text('No events found'))
+                      : SingleChildScrollView(
+                          padding: const EdgeInsets.all(16),
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: DataTable(
+                              headingRowColor: MaterialStateProperty.all(
+                                Colors.red.shade100,
+                              ),
+                              border: TableBorder.all(
+                                color: Colors.grey.shade300,
+                              ),
+                              columns: [
+                                const DataColumn(
+                                  label: Text(
+                                    'Event Type',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                                 ),
-                                ..._eventTypes.map((et) => DropdownMenuItem<int?>(
-                                      value: _toInt(et['id']),
-                                      child: Text(
-                                        et['name']?.toString() ?? '',
-                                        style: const TextStyle(decoration: TextDecoration.none),
+                                const DataColumn(
+                                  label: Text(
+                                    'Club',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                const DataColumn(
+                                  label: Text(
+                                    'Date',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                const DataColumn(
+                                  label: Text(
+                                    'Location',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                if (_isAdmin)
+                                  const DataColumn(
+                                    label: Text(
+                                      'Actions',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
                                       ),
-                                    )),
+                                    ),
+                                  ),
                               ],
-                              onChanged: (val) {
-                                setState(() => _filterEventTypeId = val);
-                                _load();
-                              },
-                            ),
-                          ),
-                          const SizedBox(width: 16), // ✅ More breathing room
-                          // Date Range Filter
-                          SizedBox(
-                            width: 200, // ✅ Comfortable width
-                            child: DropdownButtonFormField<String?>(
-                              value: _filterDateRange,
-                              decoration: const InputDecoration(
-                                hintText: 'Date Range',
-                                border: OutlineInputBorder(),
-                                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                              ),
-                              style: const TextStyle(
-                                color: Colors.black,
-                                decoration: TextDecoration.none,
-                                fontSize: 14,
-                              ),
-                              items: const [
-                                DropdownMenuItem<String?>(
-                                  value: null,
-                                  child: Text('All Dates', style: TextStyle(decoration: TextDecoration.none)),
-                                ),
-                                DropdownMenuItem<String?>(
-                                  value: 'today',
-                                  child: Text('Today', style: TextStyle(decoration: TextDecoration.none)),
-                                ),
-                                DropdownMenuItem<String?>(
-                                  value: 'week',
-                                  child: Text('Next 7 Days', style: TextStyle(decoration: TextDecoration.none)),
-                                ),
-                                DropdownMenuItem<String?>(
-                                  value: 'month',
-                                  child: Text('Next 30 Days', style: TextStyle(decoration: TextDecoration.none)),
-                                ),
-                              ],
-                              onChanged: (val) {
-                                setState(() => _filterDateRange = val);
-                                _load();
-                              },
-                            ),
-                          ),
-                          const SizedBox(width: 16), // ✅ More breathing room
-                          // Clear Filters Button
-                          ElevatedButton.icon(
-                            onPressed: () {
-                              setState(() {
-                                _filterEventTypeId = null;
-                                _filterDateRange = null;
-                              });
-                              _load();
-                            },
-                            icon: const Icon(Icons.clear),
-                            label: const Text('Clear'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  // Table
-                  Expanded(
-                    child: _events.isEmpty
-                        ? const Center(child: Text('No events found'))
-                        : SingleChildScrollView(
-                            padding: const EdgeInsets.all(16),
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: DataTable(
-                                headingRowColor: MaterialStateProperty.all(Colors.red.shade100),
-                                border: TableBorder.all(color: Colors.grey.shade300),
-                                columns: [
-                                  const DataColumn(label: Text('Event Type', style: TextStyle(fontWeight: FontWeight.bold))),
-                                  const DataColumn(label: Text('Club', style: TextStyle(fontWeight: FontWeight.bold))),
-                                  const DataColumn(label: Text('Date', style: TextStyle(fontWeight: FontWeight.bold))),
-                                  const DataColumn(label: Text('Location', style: TextStyle(fontWeight: FontWeight.bold))),
-                                  if (_isAdmin)
-                                    const DataColumn(label: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold))),
-                                ],
-                                rows: _events.map((e) {
-                                  final eventId = _toInt(e['id']) ?? 0;
-                                  return DataRow(
-                                    cells: [
-                                      DataCell(
-                                        Text(e['event_type']?.toString() ?? ''),
-                                        onTap: () => Navigator.push(
-                                          context,
-                                          MaterialPageRoute(builder: (_) => EventDetailPage(eventId: eventId)),
+                              rows: _events.map((e) {
+                                final eventId = _toInt(e['id']) ?? 0;
+                                return DataRow(
+                                  cells: [
+                                    DataCell(
+                                      Text(e['event_type']?.toString() ?? ''),
+                                      onTap: () => Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) =>
+                                              EventDetailPage(eventId: eventId),
                                         ),
                                       ),
-                                      DataCell(
-                                        Text(e['club_name']?.toString() ?? ''),
-                                        onTap: () => Navigator.push(
-                                          context,
-                                          MaterialPageRoute(builder: (_) => EventDetailPage(eventId: eventId)),
+                                    ),
+                                    DataCell(
+                                      Text(e['club_name']?.toString() ?? ''),
+                                      onTap: () => Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) =>
+                                              EventDetailPage(eventId: eventId),
                                         ),
                                       ),
-                                      DataCell(
-                                        Text(e['date']?.toString() ?? e['event_date']?.toString() ?? ''),
-                                        onTap: () => Navigator.push(
-                                          context,
-                                          MaterialPageRoute(builder: (_) => EventDetailPage(eventId: eventId)),
+                                    ),
+                                    DataCell(
+                                      Text(
+                                        e['date']?.toString() ??
+                                            e['event_date']?.toString() ??
+                                            '',
+                                      ),
+                                      onTap: () => Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) =>
+                                              EventDetailPage(eventId: eventId),
                                         ),
                                       ),
-                                      DataCell(
-                                        Text(e['location']?.toString() ?? ''),
-                                        onTap: () => Navigator.push(
-                                          context,
-                                          MaterialPageRoute(builder: (_) => EventDetailPage(eventId: eventId)),
+                                    ),
+                                    DataCell(
+                                      Text(e['location']?.toString() ?? ''),
+                                      onTap: () => Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) =>
+                                              EventDetailPage(eventId: eventId),
                                         ),
                                       ),
-                                      if (_isAdmin)
-                                        DataCell(
-                                          Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              IconButton(
-                                                icon: const Icon(Icons.edit, color: Colors.blue, size: 20),
-                                                onPressed: () => _openEditEventDialog(e as Map<String, dynamic>),
-                                                tooltip: 'Edit',
+                                    ),
+                                    if (_isAdmin)
+                                      DataCell(
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            IconButton(
+                                              icon: const Icon(
+                                                Icons.edit,
+                                                color: Colors.blue,
+                                                size: 20,
                                               ),
-                                              IconButton(
-                                                icon: const Icon(Icons.delete, color: Colors.red, size: 20),
-                                                onPressed: () => _deleteEvent(eventId),
-                                                tooltip: 'Delete',
+                                              onPressed: () =>
+                                                  _openEditEventDialog(
+                                                    e as Map<String, dynamic>,
+                                                  ),
+                                              tooltip: 'Edit',
+                                            ),
+                                            IconButton(
+                                              icon: const Icon(
+                                                Icons.delete,
+                                                color: Colors.red,
+                                                size: 20,
                                               ),
-                                            ],
-                                          ),
+                                              onPressed: () =>
+                                                  _deleteEvent(eventId),
+                                              tooltip: 'Delete',
+                                            ),
+                                          ],
                                         ),
-                                    ],
-                                  );
-                                }).toList(),
-                              ),
+                                      ),
+                                  ],
+                                );
+                              }).toList(),
                             ),
                           ),
-                  ),
-                ],
-              ),
-    // Move floatingActionButton inside the Scaffold:
-    floatingActionButton: _isAdmin
-        ? FloatingActionButton.extended(
-            onPressed: _openCreateEventDialog,
-            icon: const Icon(Icons.add),
-            label: const Text('Create Event'),
-            backgroundColor: Colors.red,
-          )
-        : null,
-  );
+                        ),
+                ),
+              ],
+            ),
+      // Move floatingActionButton inside the Scaffold:
+      floatingActionButton: _isAdmin
+          ? FloatingActionButton.extended(
+              onPressed: _openCreateEventDialog,
+              icon: const Icon(Icons.add),
+              label: const Text('Create Event'),
+              backgroundColor: Colors.red,
+            )
+          : null,
+    );
   }
 }

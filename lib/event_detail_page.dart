@@ -843,7 +843,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
         .cast<Map<String, dynamic>>();
     dynamic selectedMemberId = role['member_id'];
     if (!mounted) return;
-    final choice = await showDialog<dynamic>(
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
@@ -888,15 +888,24 @@ class _EventDetailPageState extends State<EventDetailPage> {
               child: const Text('Cancel'),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(ctx, selectedMemberId),
+              onPressed: () => Navigator.pop(ctx, {
+                'confirmed': true,
+                'member_id': selectedMemberId,
+              }),
               child: const Text('Save'),
             ),
           ],
         ),
       ),
     );
-    // Allow null to clear assignment - don't return early
-    // If user canceled the dialog, they didn't change the selection, so it's the same value (no-op)
+
+    // Distinguish cancel from explicit clear selection.
+    if (result == null || result['confirmed'] != true) {
+      return;
+    }
+
+    final choice = result['member_id'];
+
     debugPrint(
       'DEBUG: EventDetailPage _pickVolunteer -> POST $apiBase/events/${widget.eventId}/volunteer',
     );

@@ -1173,7 +1173,7 @@ Future<Response> _assignVolunteer(Request req, String eventId) async {
     final bodyJson = jsonDecode(raw) as Map<String, dynamic>;
 
     final roleId = bodyJson['role_id'];
-    final memberId = bodyJson['member_id'];
+    final memberIdRaw = bodyJson['member_id'];
 
     if (roleId == null) {
       return Response(400, body: 'Missing required field: role_id');
@@ -1181,8 +1181,17 @@ Future<Response> _assignVolunteer(Request req, String eventId) async {
 
     conn = await _connect();
 
-    // If memberId is null, delete the assignment (clear it)
-    if (memberId == null) {
+    final memberIdText = memberIdRaw?.toString().trim().toLowerCase();
+    final shouldClear = memberIdRaw == null ||
+        memberIdText == null ||
+        memberIdText.isEmpty ||
+        memberIdText == 'null' ||
+        memberIdText == 'clear assignment' ||
+        memberIdText == 'unassigned' ||
+        memberIdText == '0';
+
+    // Clear assignment for explicit clear/null-like values.
+    if (shouldClear) {
       await conn.execute('''
         DELETE FROM event_volunteers 
         WHERE event_id = :eventId AND role_id = :roleId
@@ -1190,6 +1199,11 @@ Future<Response> _assignVolunteer(Request req, String eventId) async {
       stderr.writeln('✅ Cleared volunteer assignment for role $roleId');
       return Response.ok(jsonEncode({'success': true}),
           headers: {'Content-Type': 'application/json'});
+    }
+
+    final parsedMemberId = int.tryParse(memberIdRaw.toString());
+    if (parsedMemberId == null || parsedMemberId <= 0) {
+      return Response(400, body: 'Invalid member_id');
     }
 
     // Check if assignment already exists
@@ -1205,7 +1219,7 @@ Future<Response> _assignVolunteer(Request req, String eventId) async {
         SET member_id = :memberId 
         WHERE event_id = :eventId AND role_id = :roleId
       ''', {
-        'memberId': memberId.toString(),
+        'memberId': parsedMemberId.toString(),
         'eventId': eventId,
         'roleId': roleId.toString()
       });
@@ -1218,7 +1232,7 @@ Future<Response> _assignVolunteer(Request req, String eventId) async {
       ''', {
         'eventId': eventId,
         'roleId': roleId.toString(),
-        'memberId': memberId.toString()
+        'memberId': parsedMemberId.toString()
       });
       stderr.writeln('✅ Created volunteer assignment for role $roleId');
     }

@@ -9,7 +9,7 @@ import 'package:flutter/foundation.dart';
 String getApiBase() {
   // Set to true for AWS, false for local development
   const useAWS = true;
-  
+
   const awsHost = 'https://api.thelionsapp.com';
   const localMobileHost = 'http://192.168.4.39:8080';
   const localDevHost = 'http://127.0.0.1:8080';
@@ -24,6 +24,5 @@ String getApiBase() {
     return localMobileHost;
   }
 }
-
 
 final String apiBase = getApiBase();

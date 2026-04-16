@@ -3,7 +3,7 @@
 ; Non-commercial use only
 
 #define MyAppName "Lions Club App"
-#define MyAppVersion "4.2.1"
+#define MyAppVersion "4.2.2"
 #define MyAppPublisher "Lions Club"
 #define MyAppURL "https://github.com/ianehyndman-max/Lions_App"
 #define MyAppExeName "lions_app_3.exe"
@@ -32,7 +32,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 DisableProgramGroupPage=yes
 ; Uncomment the following line to run in non administrative install mode (install for current user only).
 ;PrivilegesRequired=lowest
-OutputBaseFilename=LionsClubApp_Setup_v4.2.1
+OutputBaseFilename=LionsClubApp_Setup_v4.2.2
+SetupIconFile=C:\Users\IanHy\dev\flutter\Projects\Trying_Flutter\Lions_App\lions_app_3\windows\runner\resources\app_icon.ico
 SolidCompression=yes
 WizardStyle=modern dynamic
 
@@ -43,14 +44,12 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "C:\Users\IanHy\dev\flutter\Projects\Trying_Flutter\Lions_App\lions_app_3\build\windows\x64\runner\Release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "C:\Users\IanHy\dev\flutter\Projects\Trying_Flutter\Lions_App\lions_app_3\build\windows\x64\runner\Release\*.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "C:\Users\IanHy\dev\flutter\Projects\Trying_Flutter\Lions_App\lions_app_3\build\windows\x64\runner\Release\data\*"; DestDir: "{app}\data"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "C:\Users\IanHy\dev\flutter\Projects\Trying_Flutter\Lions_App\lions_app_3\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
