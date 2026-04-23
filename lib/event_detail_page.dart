@@ -8,6 +8,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 import 'widgets/email_html_editor.dart'; // selector: exports stub for Windows
 import 'config.dart';
+import 'api_client.dart';
 
 class EventDetailPage extends StatefulWidget {
   final dynamic eventId;
@@ -33,6 +34,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
 
   int? _userMemberId;
   bool _isAdmin = false;
+  List<String> _dinnerMealOptions = [];
   //String? _clubEmail;
   //String? _clubPhone;
 
@@ -44,6 +46,11 @@ class _EventDetailPageState extends State<EventDetailPage> {
     final t = _event?['event_type']?.toString() ?? '';
     final idStr = _event?['event_type_id']?.toString() ?? '';
     return t == 'Other' || idStr == '4';
+  }
+
+  bool get _isDinnerMeeting {
+    final t = (_event?['event_type']?.toString() ?? '').toLowerCase();
+    return t == 'dinner meeting';
   }
 
   bool get _hasUnassigned => _roles.any(
@@ -427,6 +434,24 @@ class _EventDetailPageState extends State<EventDetailPage> {
     _load();
   }
 
+  Future<void> _loadDinnerMealOptions() async {
+    try {
+      final res = await ApiClient.get('/dinner_meal_options');
+      if (res.statusCode != 200) {
+        setState(() => _dinnerMealOptions = []);
+        return;
+      }
+
+      final list = (json.decode(res.body) as List)
+          .map((e) => (e as Map<String, dynamic>)['name']?.toString() ?? '')
+          .where((name) => name.trim().isNotEmpty)
+          .toList();
+      setState(() => _dinnerMealOptions = list);
+    } catch (_) {
+      setState(() => _dinnerMealOptions = []);
+    }
+  }
+
   Future<void> _load() async {
     setState(() {
       _loading = true;
@@ -450,6 +475,12 @@ class _EventDetailPageState extends State<EventDetailPage> {
         _notesController.text = _event!['notes']?.toString() ?? '';
         debugPrint('DEBUG: EventDetail roles.length=${_roles.length}');
         setState(() => _loading = false);
+
+        if (_isDinnerMeeting) {
+          await _loadDinnerMealOptions();
+        } else {
+          setState(() => _dinnerMealOptions = []);
+        }
 
         if (!_openedAutoPreview) {
           _openedAutoPreview = true;
@@ -551,87 +582,142 @@ class _EventDetailPageState extends State<EventDetailPage> {
   Future<void> _printEvent() async {
     if (_event == null) return;
 
+    // Normalize role rows so different backend shapes still print correctly.
+    List<Map<String, dynamic>> printRoles = _roles
+        .whereType<Map>()
+        .map((r) => Map<String, dynamic>.from(r))
+        .toList();
+
+    // Fallback for payloads that embed roles under event instead of top-level.
+    if (printRoles.isEmpty && _event!['roles'] is List) {
+      printRoles = (_event!['roles'] as List)
+          .whereType<Map>()
+          .map((r) => Map<String, dynamic>.from(r))
+          .toList();
+    }
+
+    final roleRows = printRoles.map((r) {
+      final roleName =
+          (r['role_name'] ?? r['role'] ?? r['name'] ?? '').toString();
+      final timeIn = (r['time_in'] ?? r['start_time'] ?? '').toString();
+      final timeOut = (r['time_out'] ?? r['end_time'] ?? '').toString();
+      final volunteer =
+          (r['volunteer_name'] ?? r['member_name'] ?? 'Unassigned').toString();
+      final mealChoice = (r['meal_choice'] ?? '').toString();
+
+      return _isDinnerMeeting
+        ? [roleName, timeIn, timeOut, volunteer, mealChoice, '']
+        : [roleName, timeIn, timeOut, volunteer, ''];
+    }).toList();
+
+    if (roleRows.isEmpty) {
+      final rawTypeId = _event!['event_type_id'];
+      final eventTypeId = rawTypeId is int
+          ? rawTypeId
+          : int.tryParse(rawTypeId?.toString() ?? '');
+
+      if (eventTypeId != null) {
+        try {
+          final res = await ApiClient.get(
+            '/event_types/$eventTypeId/role_templates',
+          );
+          if (res.statusCode == 200) {
+            final templates = (json.decode(res.body) as List)
+                .whereType<Map>()
+                .map((t) => Map<String, dynamic>.from(t));
+
+            for (final t in templates) {
+              roleRows.add([
+                (t['role_name'] ?? t['name'] ?? '').toString(),
+                (t['time_in'] ?? t['start_time'] ?? '').toString(),
+                (t['time_out'] ?? t['end_time'] ?? '').toString(),
+                'Unassigned',
+                if (_isDinnerMeeting) '',
+                '',
+              ]);
+            }
+          }
+        } catch (_) {
+          // Keep printing even if template fallback fetch fails.
+        }
+      }
+    }
+
+    // Keep table visible for all event types, even when no roles are present.
+    if (roleRows.isEmpty) {
+      roleRows.add(
+        _isDinnerMeeting
+            ? ['No roles configured', '', '', '', '', '']
+            : ['No roles configured', '', '', '', ''],
+      );
+    }
+
     final pdf = pw.Document();
     pdf.addPage(
-      pw.Page(
+      pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         build: (pw.Context context) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text(
-                '${_event!['event_type']} - ${_event!['club_name']}',
-                style: pw.TextStyle(
-                  fontSize: 24,
-                  fontWeight: pw.FontWeight.bold,
-                ),
+          return [
+            pw.Text(
+              '${_event!['event_type']} - ${_event!['club_name']}',
+              style: pw.TextStyle(
+                fontSize: 24,
+                fontWeight: pw.FontWeight.bold,
               ),
-              pw.SizedBox(height: 20),
-              pw.Text(
-                'Date: ${_event!['date'] ?? ''}',
-                style: const pw.TextStyle(fontSize: 14),
+            ),
+            pw.SizedBox(height: 20),
+            pw.Text(
+              'Date: ${_event!['date'] ?? ''}',
+              style: const pw.TextStyle(fontSize: 14),
+            ),
+            pw.Text(
+              'Location: ${_event!['location'] ?? ''}',
+              style: const pw.TextStyle(fontSize: 14),
+            ),
+            pw.SizedBox(height: 20),
+            pw.Text(
+              'Volunteer Roles',
+              style: pw.TextStyle(
+                fontSize: 18,
+                fontWeight: pw.FontWeight.bold,
               ),
+            ),
+            pw.SizedBox(height: 10),
+            pw.TableHelper.fromTextArray(
+              headers: _isDinnerMeeting
+                  ? ['Role', 'Time In', 'Time Out', 'Volunteer', 'Meal', 'Signature']
+                  : ['Role', 'Time In', 'Time Out', 'Volunteer', 'Signature'],
+              data: roleRows,
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+              cellAlignment: pw.Alignment.centerLeft,
+              border: pw.TableBorder.all(),
+              columnWidths: {
+                0: const pw.FlexColumnWidth(2),
+                1: const pw.FlexColumnWidth(1.5),
+                2: const pw.FlexColumnWidth(1.5),
+                3: const pw.FlexColumnWidth(2),
+                if (_isDinnerMeeting) 4: const pw.FlexColumnWidth(2),
+                if (_isDinnerMeeting) 5: const pw.FlexColumnWidth(2),
+                if (!_isDinnerMeeting) 4: const pw.FlexColumnWidth(2.5),
+              },
+            ),
+            pw.SizedBox(height: 20),
+            if (_event!['notes']?.toString().isNotEmpty ?? false) ...[
               pw.Text(
-                'Location: ${_event!['location'] ?? ''}',
-                style: const pw.TextStyle(fontSize: 14),
-              ),
-              pw.SizedBox(height: 20),
-              pw.Text(
-                'Volunteer Roles',
+                'Notes',
                 style: pw.TextStyle(
                   fontSize: 18,
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
               pw.SizedBox(height: 10),
-              pw.TableHelper.fromTextArray(
-                headers: [
-                  'Role',
-                  'Time In',
-                  'Time Out',
-                  'Volunteer',
-                  'Signature',
-                ],
-                data: _roles.map((r) {
-                  final volunteer =
-                      r['volunteer_name']?.toString() ?? 'Unassigned';
-                  return [
-                    r['role_name'] ?? '',
-                    r['time_in'] ?? '',
-                    r['time_out'] ?? '',
-                    volunteer,
-                    '',
-                  ];
-                }).toList(),
-                headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                cellAlignment: pw.Alignment.centerLeft,
-                border: pw.TableBorder.all(),
-                columnWidths: {
-                  0: const pw.FlexColumnWidth(2),
-                  1: const pw.FlexColumnWidth(1.5),
-                  2: const pw.FlexColumnWidth(1.5),
-                  3: const pw.FlexColumnWidth(2),
-                  4: const pw.FlexColumnWidth(2.5),
-                },
+              pw.Container(
+                padding: const pw.EdgeInsets.all(10),
+                decoration: pw.BoxDecoration(border: pw.Border.all()),
+                child: pw.Text(_event!['notes']?.toString() ?? ''),
               ),
-              pw.SizedBox(height: 20),
-              if (_event!['notes']?.toString().isNotEmpty ?? false) ...[
-                pw.Text(
-                  'Notes',
-                  style: pw.TextStyle(
-                    fontSize: 18,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
-                pw.SizedBox(height: 10),
-                pw.Container(
-                  padding: const pw.EdgeInsets.all(10),
-                  decoration: pw.BoxDecoration(border: pw.Border.all()),
-                  child: pw.Text(_event!['notes']?.toString() ?? ''),
-                ),
-              ],
             ],
-          );
+          ];
         },
       ),
     );
@@ -744,26 +830,63 @@ class _EventDetailPageState extends State<EventDetailPage> {
       );
       return;
     }
-    final ok = await showDialog<bool>(
+    String? selectedMeal = role['meal_choice']?.toString();
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Volunteer for this role?'),
-        content: Text(
-          'Role: ${role['role_name']}\n${role['time_in']} - ${role['time_out']}',
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Volunteer for this role?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Role: ${role['role_name']}\n${role['time_in']} - ${role['time_out']}',
+              ),
+              if (_isDinnerMeeting && _dinnerMealOptions.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  value: selectedMeal,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Meal (optional)',
+                  ),
+                  items: [
+                    const DropdownMenuItem<String>(
+                      value: null,
+                      child: Text('No meal selected'),
+                    ),
+                    ..._dinnerMealOptions.map(
+                      (meal) => DropdownMenuItem<String>(
+                        value: meal,
+                        child: Text(meal),
+                      ),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    setDialogState(() => selectedMeal = value);
+                  },
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, {
+                'confirmed': true,
+                'meal_choice': selectedMeal,
+              }),
+              child: const Text('Sign Up'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Sign Up'),
-          ),
-        ],
       ),
     );
-    if (ok != true) return;
+    if (result == null || result['confirmed'] != true) return;
     debugPrint(
       'DEBUG: EventDetailPage _volunteerSelf -> POST $apiBase/events/${widget.eventId}/volunteer',
     );
@@ -773,6 +896,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
       body: json.encode({
         'role_id': role['role_id'],
         'member_id': _userMemberId,
+        'meal_choice': result['meal_choice'],
       }),
     );
     if (!mounted) return;
@@ -842,6 +966,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
     final members = (json.decode(res.body) as List)
         .cast<Map<String, dynamic>>();
     dynamic selectedMemberId = role['member_id'];
+    String? selectedMeal = role['meal_choice']?.toString();
     if (!mounted) return;
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -879,6 +1004,29 @@ class _EventDetailPageState extends State<EventDetailPage> {
                     ],
                   ),
                 ),
+                if (_isDinnerMeeting && _dinnerMealOptions.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    value: selectedMeal,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Meal (optional)',
+                    ),
+                    items: [
+                      const DropdownMenuItem<String>(
+                        value: null,
+                        child: Text('No meal selected'),
+                      ),
+                      ..._dinnerMealOptions.map(
+                        (meal) => DropdownMenuItem<String>(
+                          value: meal,
+                          child: Text(meal),
+                        ),
+                      ),
+                    ],
+                    onChanged: (v) => setDialogState(() => selectedMeal = v),
+                  ),
+                ],
               ],
             ),
           ),
@@ -891,6 +1039,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
               onPressed: () => Navigator.pop(ctx, {
                 'confirmed': true,
                 'member_id': selectedMemberId,
+                'meal_choice': selectedMeal,
               }),
               child: const Text('Save'),
             ),
@@ -905,6 +1054,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
     }
 
     final choice = result['member_id'];
+    final mealChoice = result['meal_choice'];
 
     debugPrint(
       'DEBUG: EventDetailPage _pickVolunteer -> POST $apiBase/events/${widget.eventId}/volunteer',
@@ -912,7 +1062,11 @@ class _EventDetailPageState extends State<EventDetailPage> {
     final post = await http.post(
       Uri.parse('$apiBase/events/${widget.eventId}/volunteers'),
       headers: {'Content-Type': 'application/json'},
-      body: json.encode({'role_id': role['role_id'], 'member_id': choice}),
+      body: json.encode({
+        'role_id': role['role_id'],
+        'member_id': choice,
+        'meal_choice': mealChoice,
+      }),
     );
     if (!mounted) return;
     if (post.statusCode == 200) {
@@ -920,6 +1074,35 @@ class _EventDetailPageState extends State<EventDetailPage> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Saved')));
+    } else {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed: ${post.body}')));
+    }
+  }
+
+  Future<void> _saveMealChoice(Map<String, dynamic> role, String? meal) async {
+    final memberId = role['member_id'];
+    if (memberId == null || memberId.toString().isEmpty) {
+      return;
+    }
+
+    final post = await http.post(
+      Uri.parse('$apiBase/events/${widget.eventId}/volunteers'),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({
+        'role_id': role['role_id'],
+        'member_id': memberId,
+        'meal_choice': meal,
+      }),
+    );
+
+    if (!mounted) return;
+    if (post.statusCode == 200) {
+      await _load();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Meal saved')));
     } else {
       ScaffoldMessenger.of(
         context,
@@ -1149,7 +1332,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
                         Colors.red.shade100,
                       ),
                       border: TableBorder.all(color: Colors.grey.shade300),
-                      columns: const [
+                      columns: [
                         DataColumn(
                           label: Text(
                             'Role',
@@ -1174,6 +1357,13 @@ class _EventDetailPageState extends State<EventDetailPage> {
                             style: TextStyle(fontWeight: FontWeight.bold),
                           ),
                         ),
+                        if (_isDinnerMeeting)
+                          const DataColumn(
+                            label: Text(
+                              'Meal',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ),
                         DataColumn(
                           label: Text(
                             'Action',
@@ -1185,11 +1375,16 @@ class _EventDetailPageState extends State<EventDetailPage> {
                         final volunteer = r['volunteer_name'] ?? '';
                         final hasVolunteer = volunteer.toString().isNotEmpty;
                         final currentMemberId = r['member_id'];
+                        final mealChoice = r['meal_choice']?.toString();
                         final isCurrentUser =
                             _userMemberId != null &&
                             currentMemberId != null &&
                             currentMemberId.toString() ==
                                 _userMemberId.toString();
+                        final canEditMeal =
+                            _isDinnerMeeting &&
+                            hasVolunteer &&
+                            (_isAdmin || isCurrentUser);
                         return DataRow(
                           cells: [
                             DataCell(Text(r['role_name'] ?? '')),
@@ -1208,6 +1403,66 @@ class _EventDetailPageState extends State<EventDetailPage> {
                                 ),
                               ),
                             ),
+                            if (_isDinnerMeeting)
+                              DataCell(
+                                hasVolunteer
+                                    ? (canEditMeal &&
+                                              _dinnerMealOptions.isNotEmpty
+                                          ? SizedBox(
+                                              width: 180,
+                                              child:
+                                                  DropdownButtonFormField<String>(
+                                                value:
+                                                    _dinnerMealOptions.contains(
+                                                          mealChoice,
+                                                        )
+                                                    ? mealChoice
+                                                    : null,
+                                                isExpanded: true,
+                                                decoration:
+                                                    const InputDecoration(
+                                                  isDense: true,
+                                                  border:
+                                                      OutlineInputBorder(),
+                                                  contentPadding:
+                                                      EdgeInsets.symmetric(
+                                                    horizontal: 8,
+                                                    vertical: 8,
+                                                  ),
+                                                ),
+                                                items: [
+                                                  const DropdownMenuItem<
+                                                    String
+                                                  >(
+                                                    value: null,
+                                                    child: Text('No meal'),
+                                                  ),
+                                                  ..._dinnerMealOptions.map(
+                                                    (meal) =>
+                                                        DropdownMenuItem<
+                                                          String
+                                                        >(
+                                                          value: meal,
+                                                          child: Text(meal),
+                                                        ),
+                                                  ),
+                                                ],
+                                                onChanged: (value) async {
+                                                  await _saveMealChoice(
+                                                    r,
+                                                    value,
+                                                  );
+                                                },
+                                              ),
+                                            )
+                                          : Text(
+                                              (mealChoice == null ||
+                                                      mealChoice.isEmpty)
+                                                  ? 'Not selected'
+                                                  : mealChoice,
+                                            ))
+                                    : const Text('-'),
+                              ),
                             DataCell(
                               Row(
                                 mainAxisSize: MainAxisSize.min,

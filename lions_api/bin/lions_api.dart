@@ -43,14 +43,10 @@ void debugDbDiagnostics({
 // ---------------- Config (env first) ----------------
 String _envOr(String key, String fallback) =>
     Platform.environment[key] ?? fallback;
-final _dbHost = _envOr(
-    'DB_HOST', 'lions-club-db.c12ge624w2tu.ap-southeast-2.rds.amazonaws.com');
-//final _dbHost = _envOr('DB_HOST', 'localhost');
+final _dbHost = _envOr('DB_HOST', '127.0.0.1');
 final _dbPort = int.tryParse(Platform.environment['DB_PORT'] ?? '') ?? 3306;
-final _dbUser = _envOr('DB_USER', 'admin');
-//final _dbUser = _envOr('DB_USER', 'root');
-final _dbPass = _envOr('DB_PASS', 'ML4231LionsApp!');
-//final _dbPass = _envOr('DB_PASS', 'IanMySql1*.*');
+final _dbUser = _envOr('DB_USER', 'root');
+final _dbPass = _envOr('DB_PASS', '');
 final _dbName = _envOr('DB_NAME', 'lions');
 
 final _smtpUser = _envOr('SMTP_USER', '');
@@ -554,16 +550,14 @@ Future<Response> _createEvent(Request req) async {
 
     stderr.writeln('✅ Event created with ID: $newEventId');
 
-    // Insert roles
+    // Insert roles: use provided roles, or fall back to event type templates
     if (customRoles != null && customRoles.isNotEmpty) {
-      stderr.writeln('🔵 Inserting ${customRoles.length} roles...');
+      stderr.writeln('🔵 Inserting ${customRoles.length} custom roles...');
       for (final r in customRoles) {
         final roleName = r['role_name']?.toString() ?? '';
         final timeIn = r['time_in']?.toString() ?? '';
         final timeOut = r['time_out']?.toString() ?? '';
-
         if (roleName.isEmpty) continue;
-
         await conn.execute('''
           INSERT INTO roles (event_id, event_type_id, role_name, time_in, time_out)
           VALUES (:eid, :etid, :name, :tin, :tout)
@@ -575,7 +569,32 @@ Future<Response> _createEvent(Request req) async {
           'tout': timeOut
         });
       }
-      stderr.writeln('✅ Inserted ${customRoles.length} roles');
+      stderr.writeln('✅ Inserted ${customRoles.length} custom roles');
+    } else {
+      // No roles sent — copy from role templates for this event type
+      final templatesRes = await conn.execute(
+        'SELECT role_name, time_in, time_out FROM roles WHERE event_type_id = :etid AND event_id IS NULL',
+        {'etid': eventTypeId.toString()},
+      );
+      if (templatesRes.rows.isNotEmpty) {
+        stderr.writeln('🔵 Copying ${templatesRes.rows.length} role templates');
+        for (final row in templatesRes.rows) {
+          final a = row.assoc();
+          await conn.execute('''
+            INSERT INTO roles (event_id, event_type_id, role_name, time_in, time_out)
+            VALUES (:eid, :etid, :name, :tin, :tout)
+          ''', {
+            'eid': newEventId.toString(),
+            'etid': eventTypeId.toString(),
+            'name': a['role_name'] ?? '',
+            'tin': a['time_in'] ?? '',
+            'tout': a['time_out'] ?? '',
+          });
+        }
+        stderr.writeln('✅ Copied ${templatesRes.rows.length} role templates');
+      } else {
+        stderr.writeln('ℹ️ No role templates found for event type $eventTypeId');
+      }
     }
 
     // Log audit
@@ -760,7 +779,7 @@ Future<Response> _eventDetails(Request req, String eventId) async {
 
     // **UPDATED: Only fetch event-specific roles (templates already copied)**
     final rolesSql = '''
-      SELECT r.id AS role_id, r.role_name, r.time_in, r.time_out, v.member_id, m.name AS volunteer_name
+      SELECT r.id AS role_id, r.role_name, r.time_in, r.time_out, v.member_id, v.meal_choice, m.name AS volunteer_name
       FROM roles r
       LEFT JOIN event_volunteers v ON v.role_id = r.id AND v.event_id = :eventId
       LEFT JOIN members m ON m.id = v.member_id
@@ -780,6 +799,7 @@ Future<Response> _eventDetails(Request req, String eventId) async {
         'time_in': a['time_in']?.toString() ?? '',
         'time_out': a['time_out']?.toString() ?? '',
         'member_id': a['member_id'],
+        'meal_choice': a['meal_choice'],
         'volunteer_name': a['volunteer_name'],
       };
     }).toList();
@@ -996,6 +1016,138 @@ Future<Response> _deleteRoleTemplate(Request req, String templateId) async {
   }
 }
 
+Future<Response> _getDinnerMealOptions(Request req) async {
+  stderr.writeln('🔵 GET /dinner_meal_options');
+  MySQLConnection? conn;
+  try {
+    conn = await _connect();
+    final result = await conn.execute('''
+      SELECT id, option_name, sort_order
+      FROM dinner_meal_options
+      ORDER BY sort_order, option_name
+    ''');
+
+    final options = <Map<String, dynamic>>[];
+    for (final row in result.rows) {
+      final a = row.assoc();
+      options.add({
+        'id': a['id'],
+        'name': a['option_name'],
+        'sort_order': a['sort_order'],
+      });
+    }
+
+    return Response.ok(
+      jsonEncode(options),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _getDinnerMealOptions: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _saveDinnerMealOption(Request req) async {
+  stderr.writeln('🔵 POST /dinner_meal_options');
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) {
+      return Response(401, body: 'Unauthorized');
+    }
+
+    conn = await _connect();
+
+    final isAdmin = await _isAdmin(conn, authMemberId);
+    final isSuper = await _isSuper(conn, authMemberId);
+    if (!isAdmin && !isSuper) {
+      return Response(403, body: 'Forbidden: admin access required');
+    }
+
+    final raw = await req.readAsString();
+    if (raw.isEmpty) return Response(400, body: 'Missing body');
+    final bodyJson = jsonDecode(raw) as Map<String, dynamic>;
+
+    final optionId = bodyJson['id'];
+    final name = bodyJson['name']?.toString().trim() ?? '';
+    final sortOrder = int.tryParse(bodyJson['sort_order']?.toString() ?? '') ??
+        999;
+
+    if (name.isEmpty) {
+      return Response(400, body: 'Meal option name required');
+    }
+
+    if (optionId == null) {
+      await conn.execute('''
+        INSERT INTO dinner_meal_options (option_name, sort_order)
+        VALUES (:name, :sortOrder)
+      ''', {
+        'name': name,
+        'sortOrder': sortOrder.toString(),
+      });
+      final idRes = await conn.execute('SELECT LAST_INSERT_ID() AS id');
+      final newId = idRes.rows.first.assoc()['id'];
+      return Response.ok(
+        jsonEncode({'id': newId}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+
+    await conn.execute('''
+      UPDATE dinner_meal_options
+      SET option_name = :name, sort_order = :sortOrder
+      WHERE id = :id
+    ''', {
+      'id': optionId.toString(),
+      'name': name,
+      'sortOrder': sortOrder.toString(),
+    });
+
+    return Response.ok(
+      jsonEncode({'success': true}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _saveDinnerMealOption: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _deleteDinnerMealOption(Request req, String optionId) async {
+  stderr.writeln('🔵 DELETE /dinner_meal_options/$optionId');
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) {
+      return Response(401, body: 'Unauthorized');
+    }
+
+    conn = await _connect();
+
+    final isAdmin = await _isAdmin(conn, authMemberId);
+    final isSuper = await _isSuper(conn, authMemberId);
+    if (!isAdmin && !isSuper) {
+      return Response(403, body: 'Forbidden: admin access required');
+    }
+
+    await conn.execute(
+      'DELETE FROM dinner_meal_options WHERE id = :id',
+      {'id': optionId},
+    );
+
+    return Response(204);
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _deleteDinnerMealOption: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
 Future<Response> _clubs(Request req) async {
   stderr.writeln('🔵 GET /clubs');
   MySQLConnection? conn;
@@ -1174,6 +1326,9 @@ Future<Response> _assignVolunteer(Request req, String eventId) async {
 
     final roleId = bodyJson['role_id'];
     final memberIdRaw = bodyJson['member_id'];
+    final mealChoiceRaw = bodyJson['meal_choice']?.toString().trim();
+    final mealChoice =
+      (mealChoiceRaw == null || mealChoiceRaw.isEmpty) ? null : mealChoiceRaw;
 
     if (roleId == null) {
       return Response(400, body: 'Missing required field: role_id');
@@ -1216,10 +1371,11 @@ Future<Response> _assignVolunteer(Request req, String eventId) async {
       // Update existing assignment
       await conn.execute('''
         UPDATE event_volunteers 
-        SET member_id = :memberId 
+        SET member_id = :memberId, meal_choice = :mealChoice
         WHERE event_id = :eventId AND role_id = :roleId
       ''', {
         'memberId': parsedMemberId.toString(),
+        'mealChoice': mealChoice,
         'eventId': eventId,
         'roleId': roleId.toString()
       });
@@ -1227,12 +1383,13 @@ Future<Response> _assignVolunteer(Request req, String eventId) async {
     } else {
       // Create new assignment
       await conn.execute('''
-        INSERT INTO event_volunteers (event_id, role_id, member_id)
-        VALUES (:eventId, :roleId, :memberId)
+        INSERT INTO event_volunteers (event_id, role_id, member_id, meal_choice)
+        VALUES (:eventId, :roleId, :memberId, :mealChoice)
       ''', {
         'eventId': eventId,
         'roleId': roleId.toString(),
-        'memberId': parsedMemberId.toString()
+        'memberId': parsedMemberId.toString(),
+        'mealChoice': mealChoice,
       });
       stderr.writeln('✅ Created volunteer assignment for role $roleId');
     }
@@ -2307,6 +2464,12 @@ Handler _router() {
   router.put('/clubs/<id>', (Request req, String id) => _updateClub(req, id));
   router.delete(
       '/clubs/<id>', (Request req, String id) => _deleteClub(req, id));
+
+    // ============ DINNER MEAL OPTIONS ROUTES ============
+    router.get('/dinner_meal_options', _getDinnerMealOptions);
+    router.post('/dinner_meal_options', _saveDinnerMealOption);
+    router.delete('/dinner_meal_options/<id>',
+      (Request req, String id) => _deleteDinnerMealOption(req, id));
 
   // ============ EVENT TYPES & ROLE TEMPLATES ROUTES ============
   // IMPORTANT: More specific routes FIRST (with /role_templates path segment)

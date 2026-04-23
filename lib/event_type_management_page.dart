@@ -16,13 +16,16 @@ class _EventTypeManagementPageState extends State<EventTypeManagementPage> {
   List<Map<String, dynamic>> _eventTypes = [];
   int? _selectedEventTypeId;
   List<Map<String, dynamic>> _roleTemplates = [];
+  List<Map<String, dynamic>> _dinnerMealOptions = [];
   bool _loading = true;
   bool _loadingTemplates = false;
+  bool _loadingDinnerMeals = false;
 
   @override
   void initState() {
     super.initState();
     _loadEventTypes();
+    _loadDinnerMealOptions();
   }
 
   Future<void> _loadEventTypes() async {
@@ -31,16 +34,35 @@ class _EventTypeManagementPageState extends State<EventTypeManagementPage> {
       final res = await http.get(Uri.parse('$apiBase/event_types'));
       if (res.statusCode == 200) {
         final List<dynamic> data = json.decode(res.body);
+        final parsedTypes = data.map((item) {
+          return {
+            'id': int.parse(item['id'].toString()),
+            'name': item['name'],
+          };
+        }).toList();
+
+        int? nextSelectedId = _selectedEventTypeId;
+        if (nextSelectedId != null &&
+            !parsedTypes.any((t) => t['id'] == nextSelectedId)) {
+          nextSelectedId = null;
+        }
+        if (nextSelectedId == null && parsedTypes.isNotEmpty) {
+          nextSelectedId = parsedTypes.first['id'] as int;
+        }
+
         setState(() {
-          // ✅ Convert id to int if it's a string
-          _eventTypes = data.map((item) {
-            return {
-              'id': int.parse(item['id'].toString()),
-              'name': item['name'],
-            };
-          }).toList();
+          _eventTypes = parsedTypes;
+          _selectedEventTypeId = nextSelectedId;
           _loading = false;
         });
+
+        if (nextSelectedId != null) {
+          await _loadRoleTemplates(nextSelectedId);
+        } else {
+          setState(() => _roleTemplates = []);
+        }
+      } else {
+        setState(() => _loading = false);
       }
     } catch (e) {
       debugPrint('Error loading event types: $e');
@@ -91,6 +113,45 @@ class _EventTypeManagementPageState extends State<EventTypeManagementPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _loadDinnerMealOptions() async {
+    setState(() => _loadingDinnerMeals = true);
+    try {
+      final res = await http.get(
+        Uri.parse('$apiBase/dinner_meal_options'),
+        headers: {'X-Member-Id': widget.memberId.toString()},
+      );
+
+      if (res.statusCode == 200) {
+        final data = (json.decode(res.body) as List)
+            .cast<Map<String, dynamic>>();
+        setState(() {
+          _dinnerMealOptions = data
+              .map(
+                (item) => {
+                  'id': int.parse(item['id'].toString()),
+                  'name': item['name']?.toString() ?? '',
+                  'sort_order': int.tryParse(
+                        item['sort_order']?.toString() ?? '',
+                      ) ??
+                      999,
+                },
+              )
+              .toList();
+          _loadingDinnerMeals = false;
+        });
+      } else {
+        throw Exception('Failed: ${res.body}');
+      }
+    } catch (e) {
+      setState(() => _loadingDinnerMeals = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading dinner meal options: $e')),
         );
       }
     }
@@ -308,6 +369,128 @@ class _EventTypeManagementPageState extends State<EventTypeManagementPage> {
     }
   }
 
+  Future<void> _addOrEditDinnerMealOption({Map<String, dynamic>? existing}) async {
+    final nameController = TextEditingController(text: existing?['name'] ?? '');
+    final sortOrderController = TextEditingController(
+      text: existing?['sort_order']?.toString() ?? '999',
+    );
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(existing == null ? 'Add Dinner Meal Option' : 'Edit Dinner Meal Option'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(labelText: 'Option Name'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: sortOrderController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Sort Order'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final name = nameController.text.trim();
+              final sortOrder = int.tryParse(sortOrderController.text.trim()) ?? 999;
+              if (name.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Option name required')),
+                );
+                return;
+              }
+
+              try {
+                final body = {
+                  if (existing != null) 'id': existing['id'],
+                  'name': name,
+                  'sort_order': sortOrder,
+                };
+                final res = await http.post(
+                  Uri.parse('$apiBase/dinner_meal_options'),
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'X-Member-Id': widget.memberId.toString(),
+                  },
+                  body: json.encode(body),
+                );
+
+                if (res.statusCode == 200) {
+                  if (ctx.mounted) Navigator.pop(ctx, true);
+                } else {
+                  throw Exception('Failed: ${res.body}');
+                }
+              } catch (e) {
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(content: Text('Error: $e')),
+                  );
+                }
+              }
+            },
+            child: Text(existing == null ? 'Add' : 'Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true) {
+      await _loadDinnerMealOptions();
+    }
+  }
+
+  Future<void> _deleteDinnerMealOption(int optionId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Meal Option'),
+        content: const Text('Delete this dinner meal option?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      final res = await http.delete(
+        Uri.parse('$apiBase/dinner_meal_options/$optionId'),
+        headers: {'X-Member-Id': widget.memberId.toString()},
+      );
+
+      if (res.statusCode == 204) {
+        await _loadDinnerMealOptions();
+      } else {
+        throw Exception('Failed: ${res.body}');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -445,6 +628,66 @@ class _EventTypeManagementPageState extends State<EventTypeManagementPage> {
                                             );
                                           },
                                         ),
+                            ),
+                            const Divider(height: 1),
+                            SizedBox(
+                              height: 240,
+                              child: Column(
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: Row(
+                                      children: [
+                                        const Expanded(
+                                          child: Text(
+                                            'Dinner Meal Options (Global)',
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                        FilledButton.icon(
+                                          onPressed: () => _addOrEditDinnerMealOption(),
+                                          icon: const Icon(Icons.add),
+                                          label: const Text('Add Option'),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: _loadingDinnerMeals
+                                        ? const Center(child: CircularProgressIndicator())
+                                        : _dinnerMealOptions.isEmpty
+                                            ? const Center(child: Text('No dinner meal options yet'))
+                                            : ListView.builder(
+                                                itemCount: _dinnerMealOptions.length,
+                                                itemBuilder: (context, index) {
+                                                  final option = _dinnerMealOptions[index];
+                                                  return ListTile(
+                                                    dense: true,
+                                                    title: Text(option['name']?.toString() ?? ''),
+                                                    subtitle: Text('Order: ${option['sort_order']}'),
+                                                    trailing: Row(
+                                                      mainAxisSize: MainAxisSize.min,
+                                                      children: [
+                                                        IconButton(
+                                                          icon: const Icon(Icons.edit),
+                                                          onPressed: () =>
+                                                              _addOrEditDinnerMealOption(existing: option),
+                                                        ),
+                                                        IconButton(
+                                                          icon: const Icon(Icons.delete, color: Colors.red),
+                                                          onPressed: () => _deleteDinnerMealOption(option['id'] as int),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  );
+                                                },
+                                              ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                         ),

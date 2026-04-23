@@ -7,14 +7,11 @@ import 'package:mysql_client/mysql_client.dart';
 // Same config as your lions_api.dart
 String _envOr(String key, String fallback) => Platform.environment[key] ?? fallback;
 
-// AWS RDS (default). Uncomment localhost for local migration.
-final _dbHost = _envOr('DB_HOST', 'lions-club-db.c12ge624w2tu.ap-southeast-2.rds.amazonaws.com');
-// final _dbHost = _envOr('DB_HOST', 'localhost');
+// Environment first, with safe local defaults.
+final _dbHost = _envOr('DB_HOST', '127.0.0.1');
 final _dbPort = int.tryParse(Platform.environment['DB_PORT'] ?? '') ?? 3306;
-final _dbUser = _envOr('DB_USER', 'admin');
-// final _dbUser = _envOr('DB_USER', 'root');
-final _dbPass = _envOr('DB_PASS', 'ML4231LionsApp!');
-// final _dbPass = _envOr('DB_PASS', 'IanMySql1*.*');
+final _dbUser = _envOr('DB_USER', 'root');
+final _dbPass = _envOr('DB_PASS', '');
 final _dbName = _envOr('DB_NAME', 'lions');
 
 void main() async {
