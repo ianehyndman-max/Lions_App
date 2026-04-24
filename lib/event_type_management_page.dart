@@ -21,6 +21,16 @@ class _EventTypeManagementPageState extends State<EventTypeManagementPage> {
   bool _loadingTemplates = false;
   bool _loadingDinnerMeals = false;
 
+  bool get _isSelectedDinnerMeeting {
+    if (_selectedEventTypeId == null) return false;
+    final selected = _eventTypes.where(
+      (t) => t['id'] == _selectedEventTypeId,
+    );
+    if (selected.isEmpty) return false;
+    final name = (selected.first['name']?.toString() ?? '').toLowerCase();
+    return name == 'dinner meeting';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -629,66 +639,68 @@ class _EventTypeManagementPageState extends State<EventTypeManagementPage> {
                                           },
                                         ),
                             ),
-                            const Divider(height: 1),
-                            SizedBox(
-                              height: 240,
-                              child: Column(
-                                children: [
-                                  Padding(
-                                    padding: const EdgeInsets.all(12),
-                                    child: Row(
-                                      children: [
-                                        const Expanded(
-                                          child: Text(
-                                            'Dinner Meal Options (Global)',
-                                            style: TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.bold,
+                            if (_isSelectedDinnerMeeting) ...[
+                              const Divider(height: 1),
+                              SizedBox(
+                                height: 240,
+                                child: Column(
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.all(12),
+                                      child: Row(
+                                        children: [
+                                          const Expanded(
+                                            child: Text(
+                                              'Dinner Meal Options (Global)',
+                                              style: TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.bold,
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                        FilledButton.icon(
-                                          onPressed: () => _addOrEditDinnerMealOption(),
-                                          icon: const Icon(Icons.add),
-                                          label: const Text('Add Option'),
-                                        ),
-                                      ],
+                                          FilledButton.icon(
+                                            onPressed: () => _addOrEditDinnerMealOption(),
+                                            icon: const Icon(Icons.add),
+                                            label: const Text('Add Option'),
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                  Expanded(
-                                    child: _loadingDinnerMeals
-                                        ? const Center(child: CircularProgressIndicator())
-                                        : _dinnerMealOptions.isEmpty
-                                            ? const Center(child: Text('No dinner meal options yet'))
-                                            : ListView.builder(
-                                                itemCount: _dinnerMealOptions.length,
-                                                itemBuilder: (context, index) {
-                                                  final option = _dinnerMealOptions[index];
-                                                  return ListTile(
-                                                    dense: true,
-                                                    title: Text(option['name']?.toString() ?? ''),
-                                                    subtitle: Text('Order: ${option['sort_order']}'),
-                                                    trailing: Row(
-                                                      mainAxisSize: MainAxisSize.min,
-                                                      children: [
-                                                        IconButton(
-                                                          icon: const Icon(Icons.edit),
-                                                          onPressed: () =>
-                                                              _addOrEditDinnerMealOption(existing: option),
-                                                        ),
-                                                        IconButton(
-                                                          icon: const Icon(Icons.delete, color: Colors.red),
-                                                          onPressed: () => _deleteDinnerMealOption(option['id'] as int),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  );
-                                                },
-                                              ),
-                                  ),
-                                ],
+                                    Expanded(
+                                      child: _loadingDinnerMeals
+                                          ? const Center(child: CircularProgressIndicator())
+                                          : _dinnerMealOptions.isEmpty
+                                              ? const Center(child: Text('No dinner meal options yet'))
+                                              : ListView.builder(
+                                                  itemCount: _dinnerMealOptions.length,
+                                                  itemBuilder: (context, index) {
+                                                    final option = _dinnerMealOptions[index];
+                                                    return ListTile(
+                                                      dense: true,
+                                                      title: Text(option['name']?.toString() ?? ''),
+                                                      subtitle: Text('Order: ${option['sort_order']}'),
+                                                      trailing: Row(
+                                                        mainAxisSize: MainAxisSize.min,
+                                                        children: [
+                                                          IconButton(
+                                                            icon: const Icon(Icons.edit),
+                                                            onPressed: () =>
+                                                                _addOrEditDinnerMealOption(existing: option),
+                                                          ),
+                                                          IconButton(
+                                                            icon: const Icon(Icons.delete, color: Colors.red),
+                                                            onPressed: () => _deleteDinnerMealOption(option['id'] as int),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    );
+                                                  },
+                                                ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
+                            ],
                           ],
                         ),
                       ),
