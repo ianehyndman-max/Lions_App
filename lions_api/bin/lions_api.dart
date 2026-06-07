@@ -784,7 +784,13 @@ Future<Response> _eventDetails(Request req, String eventId) async {
       LEFT JOIN event_volunteers v ON v.role_id = r.id AND v.event_id = :eventId
       LEFT JOIN members m ON m.id = v.member_id
       WHERE r.event_id = :eventId
-      ORDER BY r.time_in, r.role_name
+      ORDER BY
+        STR_TO_DATE(REPLACE(r.time_in, '.', ':'), '%H:%i') IS NULL,
+        STR_TO_DATE(REPLACE(r.time_in, '.', ':'), '%H:%i'),
+        STR_TO_DATE(REPLACE(r.time_out, '.', ':'), '%H:%i') IS NULL,
+        STR_TO_DATE(REPLACE(r.time_out, '.', ':'), '%H:%i'),
+        LOWER(r.role_name),
+        r.id
     ''';
 
     final rolesResult = await conn.execute(rolesSql, {'eventId': eid});
@@ -838,7 +844,13 @@ Future<Response> _getRoleTemplates(Request req, String eventTypeId) async {
       SELECT id, role_name, time_in, time_out
       FROM roles
       WHERE event_type_id = :eventTypeId AND event_id IS NULL
-      ORDER BY time_in, role_name
+      ORDER BY
+        STR_TO_DATE(REPLACE(time_in, '.', ':'), '%H:%i') IS NULL,
+        STR_TO_DATE(REPLACE(time_in, '.', ':'), '%H:%i'),
+        STR_TO_DATE(REPLACE(time_out, '.', ':'), '%H:%i') IS NULL,
+        STR_TO_DATE(REPLACE(time_out, '.', ':'), '%H:%i'),
+        LOWER(role_name),
+        id
     ''', {'eventTypeId': eventTypeId});
 
     final templates = <Map<String, dynamic>>[];
@@ -1483,7 +1495,13 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
       LEFT JOIN event_volunteers ev ON ev.role_id = r.id AND ev.event_id = :eventId
       LEFT JOIN members m ON m.id = ev.member_id
       WHERE r.event_id = :eventId
-      ORDER BY r.time_in, r.role_name
+      ORDER BY
+        STR_TO_DATE(REPLACE(r.time_in, '.', ':'), '%H:%i') IS NULL,
+        STR_TO_DATE(REPLACE(r.time_in, '.', ':'), '%H:%i'),
+        STR_TO_DATE(REPLACE(r.time_out, '.', ':'), '%H:%i') IS NULL,
+        STR_TO_DATE(REPLACE(r.time_out, '.', ':'), '%H:%i'),
+        LOWER(r.role_name),
+        r.id
     ''';
     final rolesResult = await conn.execute(rolesQuery, {'eventId': eventId});
 
