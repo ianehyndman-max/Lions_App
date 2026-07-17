@@ -1,5 +1,5 @@
 ALTER TABLE members
-  ADD COLUMN is_conference_member TINYINT(1) NOT NULL DEFAULT 0 AFTER is_super;
+  ADD COLUMN IF NOT EXISTS is_conference_member TINYINT(1) NOT NULL DEFAULT 0 AFTER is_super;
 
 CREATE TABLE IF NOT EXISTS conference_content (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -9,13 +9,11 @@ CREATE TABLE IF NOT EXISTS conference_content (
   locations_notes TEXT DEFAULT NULL,
   breakout_sessions_notes TEXT DEFAULT NULL,
   general_notes TEXT DEFAULT NULL,
-  last_updated_by_member_id INT UNSIGNED DEFAULT NULL,
+  last_updated_by_member_id BIGINT DEFAULT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  KEY fk_conference_content_member (last_updated_by_member_id),
-  CONSTRAINT fk_conference_content_member FOREIGN KEY (last_updated_by_member_id)
-    REFERENCES members (id) ON DELETE SET NULL
+  KEY idx_conference_content_member (last_updated_by_member_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS conference_ideas (
@@ -24,11 +22,9 @@ CREATE TABLE IF NOT EXISTS conference_ideas (
   description TEXT DEFAULT NULL,
   category VARCHAR(100) DEFAULT NULL,
   status VARCHAR(30) NOT NULL DEFAULT 'new',
-  created_by_member_id INT UNSIGNED DEFAULT NULL,
+  created_by_member_id BIGINT DEFAULT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  KEY fk_conference_ideas_member (created_by_member_id),
-  CONSTRAINT fk_conference_ideas_member FOREIGN KEY (created_by_member_id)
-    REFERENCES members (id) ON DELETE SET NULL
+  KEY idx_conference_ideas_member (created_by_member_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
