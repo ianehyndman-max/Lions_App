@@ -28,6 +28,46 @@ class _EventsPageState extends State<EventsPage> {
   String _fmtYmd(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
+  String _fmtDisplayDate(dynamic raw) {
+    if (raw == null) return '';
+    final value = raw.toString().trim();
+    if (value.isEmpty) return '';
+
+    final parsed = DateTime.tryParse(value);
+    if (parsed == null) return value;
+
+    const weekdays = [
+      'Mon',
+      'Tue',
+      'Wed',
+      'Thu',
+      'Fri',
+      'Sat',
+      'Sun',
+    ];
+
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+
+    final weekday = weekdays[parsed.weekday - 1];
+    final day = parsed.day.toString().padLeft(2, '0');
+    final month = months[parsed.month - 1];
+    final year = parsed.year;
+    return '$weekday $day $month $year';
+  }
+
   int? _userClubId;
   bool _isAdmin = false;
 
@@ -989,9 +1029,9 @@ class _EventsPageState extends State<EventsPage> {
                                     ),
                                     DataCell(
                                       Text(
-                                        e['date']?.toString() ??
-                                            e['event_date']?.toString() ??
-                                            '',
+                                        _fmtDisplayDate(
+                                          e['date'] ?? e['event_date'],
+                                        ),
                                       ),
                                       onTap: () => Navigator.push(
                                         context,

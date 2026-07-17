@@ -222,6 +222,7 @@ class _MembersPageState extends State<MembersPage> {
     final nameCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
+    bool isConferenceMember = false;
     debugPrint('DEBUG: isSuper=$isSuper, _userClubId=$_userClubId');
 
     // Default to user's club if set
@@ -300,6 +301,15 @@ class _MembersPageState extends State<MembersPage> {
                       style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
                     ),
                   ),
+                if (isSuper)
+                  CheckboxListTile(
+                    value: isConferenceMember,
+                    onChanged: (val) => setDlg(() => isConferenceMember = val ?? false),
+                    title: const Text('Conference Team Access'),
+                    subtitle: const Text('Can edit Conference and moderate Conference Ideas'),
+                    controlAffinity: ListTileControlAffinity.leading,
+                    contentPadding: EdgeInsets.zero,
+                  ),
               ],
             ),
           ),
@@ -329,6 +339,7 @@ class _MembersPageState extends State<MembersPage> {
         'email': emailCtrl.text.trim(),
         'phone_number': phoneCtrl.text.trim(),
         'lions_club_id': selectedClubId,
+        if (isSuper) 'is_conference_member': isConferenceMember ? 1 : 0,
       };
 
       final res = await ApiClient.post('/members', body: payload);
@@ -374,6 +385,8 @@ class _MembersPageState extends State<MembersPage> {
 
     int? selectedClubId = _toInt(member['lions_club_id']);
     bool isAdminMember = member['is_admin'] == 1 || member['is_admin'] == true;
+    bool isConferenceMember =
+      member['is_conference_member'] == 1 || member['is_conference_member'] == true;
 
     final ok = await showDialog<bool>(
       context: context,
@@ -432,6 +445,19 @@ class _MembersPageState extends State<MembersPage> {
                   controlAffinity: ListTileControlAffinity.leading,
                   contentPadding: EdgeInsets.zero,
                 ),
+                if (isSuper)
+                  CheckboxListTile(
+                    value: isConferenceMember,
+                    onChanged: (val) {
+                      setDlg(() {
+                        isConferenceMember = val ?? false;
+                      });
+                    },
+                    title: const Text('Conference Team Access'),
+                    subtitle: const Text('Can edit Conference and moderate Conference Ideas'),
+                    controlAffinity: ListTileControlAffinity.leading,
+                    contentPadding: EdgeInsets.zero,
+                  ),
               ],
             ),
           ),
@@ -458,6 +484,7 @@ class _MembersPageState extends State<MembersPage> {
         'phone_number': phoneCtrl.text.trim(),
         'lions_club_id': selectedClubId,
         'is_admin': isAdminMember ? 1 : 0,
+        if (isSuper) 'is_conference_member': isConferenceMember ? 1 : 0,
       };
 
       debugPrint('DEBUG: About to update member $idStr with payload: $payload');

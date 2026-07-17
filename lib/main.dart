@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'events_page.dart' as events;
 import 'members_page.dart' as members;
 import 'calendar_page.dart' as calendar;
+import 'conference_page.dart' as conference;
 import 'news_page.dart' as news;
 import 'onboarding_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -212,6 +213,7 @@ class HomePage extends StatelessWidget {
           _DashItem('Events', Icons.event, () => Navigator.push(context, MaterialPageRoute(builder: (_) => events.EventsPage()))),
           _DashItem('Members', Icons.group, () => Navigator.push(context, MaterialPageRoute(builder: (_) => members.MembersPage()))),
           _DashItem('Calendar', Icons.calendar_month, () => Navigator.push(context, MaterialPageRoute(builder: (_) => calendar.CalendarPage()))),
+          _DashItem('Conference', Icons.groups_2, () => Navigator.push(context, MaterialPageRoute(builder: (_) => conference.ConferencePage()))),
           _DashItem('News', Icons.article, () => Navigator.push(context, MaterialPageRoute(builder: (_) => news.NewsPage()))),
         ];
         if (isSuper) {
@@ -275,6 +277,7 @@ class _MainScreenState extends State<MainScreen> {
       members.MembersPage(),
       events.EventsPage(),
       calendar.CalendarPage(),
+      conference.ConferencePage(),
       news.NewsPage(),
     ];
   }
@@ -323,6 +326,7 @@ class _MainScreenState extends State<MainScreen> {
             NavigationRailDestination(icon: Icon(Icons.group), label: Text('Members')),
             NavigationRailDestination(icon: Icon(Icons.event), label: Text('Events')),
             NavigationRailDestination(icon: Icon(Icons.calendar_month), label: Text('Calendar')),
+            NavigationRailDestination(icon: Icon(Icons.groups_2), label: Text('Conference')),
             NavigationRailDestination(icon: Icon(Icons.article), label: Text('News')),
           ],
         ),
@@ -372,6 +376,7 @@ return Scaffold(
       BottomNavigationBarItem(icon: Icon(Icons.group), label: 'Members'),
       BottomNavigationBarItem(icon: Icon(Icons.event), label: 'Events'),
       BottomNavigationBarItem(icon: Icon(Icons.calendar_month), label: 'Calendar'),
+      BottomNavigationBarItem(icon: Icon(Icons.groups_2), label: 'Conference'),
       BottomNavigationBarItem(icon: Icon(Icons.article), label: 'News'),
     ],
   ),

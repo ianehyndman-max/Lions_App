@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -722,9 +723,20 @@ class _EventDetailPageState extends State<EventDetailPage> {
       ),
     );
 
-    await Printing.layoutPdf(
-      onLayout: (PdfPageFormat format) async => pdf.save(),
-    );
+    final pdfBytes = await pdf.save();
+
+    if (Platform.isMacOS) {
+      // Printing.layoutPdf blocks indefinitely on macOS 26 (Tahoe).
+      // Save to a temp file and open in Preview instead — Cmd+P to print from there.
+      final tempDir = Directory.systemTemp;
+      final file = File('${tempDir.path}/event_${widget.eventId}.pdf');
+      await file.writeAsBytes(pdfBytes);
+      await Process.run('open', [file.path]);
+    } else {
+      await Printing.layoutPdf(
+        onLayout: (_) async => pdfBytes,
+      );
+    }
   }
 
   Future<void> _saveNotes() async {

@@ -5,6 +5,8 @@ class AuthStore {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('is_super', user['is_super'] == 1 || user['is_super'] == true);
     await prefs.setBool('is_admin', user['is_admin'] == 1 || user['is_admin'] == true);
+    await prefs.setBool('is_conference_member',
+        user['is_conference_member'] == 1 || user['is_conference_member'] == true);
     await prefs.setInt('member_id', int.tryParse(user['id'].toString()) ?? -1);
     await prefs.setInt('club_id', int.tryParse(user['lions_club_id'].toString()) ?? -1);
   }
@@ -17,6 +19,11 @@ class AuthStore {
   static Future<bool> isAdmin() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool('is_admin') ?? false;
+  }
+
+  static Future<bool> isConferenceMember() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('is_conference_member') ?? false;
   }
 
   static Future<int?> getMemberId() async {

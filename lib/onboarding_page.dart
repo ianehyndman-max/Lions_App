@@ -1,10 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'main.dart';
 import 'config.dart';
-import 'dart:math';
 import 'auth_store.dart';
 
 class OnboardingPage extends StatefulWidget {
@@ -94,8 +92,14 @@ class _OnboardingPageState extends State<OnboardingPage> {
                     isSuperRaw == true || 
                     isSuperRaw == '1' ||
                     (isSuperRaw is List && isSuperRaw.isNotEmpty && isSuperRaw[0] == 1);
+
+    final isConferenceRaw = member['is_conference_member'];
+    final isConferenceMember = isConferenceRaw == 1 ||
+                    isConferenceRaw == true ||
+                    isConferenceRaw == '1' ||
+                    (isConferenceRaw is List && isConferenceRaw.isNotEmpty && isConferenceRaw[0] == 1);
     
-    debugPrint('DEBUG: Parsed is_admin=$isAdmin is_super=$isSuper');
+    debugPrint('DEBUG: Parsed is_admin=$isAdmin is_super=$isSuper is_conference_member=$isConferenceMember');
 
     // Build normalized member map for AuthStore
     final memberData = {
@@ -103,9 +107,10 @@ class _OnboardingPageState extends State<OnboardingPage> {
       'lions_club_id': _selectedClubId.toString(),
       'is_admin': isAdmin,
       'is_super': isSuper,
+      'is_conference_member': isConferenceMember,
     };
 
-    debugPrint('DEBUG: Saving profile -> member_id=${memberData['id']} club_id=${memberData['lions_club_id']} is_admin=$isAdmin is_super=$isSuper');
+    debugPrint('DEBUG: Saving profile -> member_id=${memberData['id']} club_id=${memberData['lions_club_id']} is_admin=$isAdmin is_super=$isSuper is_conference_member=$isConferenceMember');
     
     // Save using centralized helper
     await AuthStore.saveProfile(memberData);

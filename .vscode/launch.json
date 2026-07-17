@@ -1,0 +1,20 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Flutter App (Lions_App)",
+      "request": "launch",
+      "type": "dart",
+      "flutterMode": "debug",
+      "program": "lib/main.dart",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Dart API (lions_api)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lions_api/bin/lions_api.dart",
+      "cwd": "${workspaceFolder}/lions_api"
+    }
+  ]
+}

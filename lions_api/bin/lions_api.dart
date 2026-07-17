@@ -215,7 +215,8 @@ Future<Response> _members(Request req) async {
     conn = await _connect();
     final clubId = req.url.queryParameters['club_id'];
     final sql = '''
-      SELECT m.id, m.name, m.email, m.phone_number, m.lions_club_id, m.is_admin, m.is_super, lc.name AS club_name
+      SELECT m.id, m.name, m.email, m.phone_number, m.lions_club_id,
+             m.is_admin, m.is_super, m.is_conference_member, lc.name AS club_name
       FROM members m
       LEFT JOIN lions_club lc ON lc.id = m.lions_club_id
       ${clubId == null ? '' : 'WHERE m.lions_club_id = :clubId'}
@@ -226,13 +227,16 @@ Future<Response> _members(Request req) async {
     final list = <Map<String, dynamic>>[];
     for (final row in result.rows) {
       final a = row.assoc();
-      // Ensure is_admin and is_super are integers
+        // Ensure permission flags are integers
       final isAdminVal = a['is_admin'];
       final isSuperVal = a['is_super'];
+        final isConferenceVal = a['is_conference_member'];
       final isAdminInt =
           (isAdminVal == 1 || isAdminVal == true || isAdminVal == '1') ? 1 : 0;
       final isSuperInt =
           (isSuperVal == 1 || isSuperVal == true || isSuperVal == '1') ? 1 : 0;
+        final isConferenceInt =
+          (isConferenceVal == 1 || isConferenceVal == true || isConferenceVal == '1') ? 1 : 0;
 
       list.add({
         'id': a['id'],
@@ -242,6 +246,7 @@ Future<Response> _members(Request req) async {
         'lions_club_id': a['lions_club_id'],
         'is_admin': isAdminInt,
         'is_super': isSuperInt,
+        'is_conference_member': isConferenceInt,
         'club_name': a['club_name'],
       });
     }
@@ -290,6 +295,33 @@ Future<bool> _isAdmin(MySQLConnection conn, int memberId) async {
       val == true ||
       val == '1' ||
       (val is List && val.isNotEmpty && val[0] == 1);
+}
+
+Future<bool> _isConferenceMember(MySQLConnection conn, int memberId) async {
+  final r = await conn.execute(
+      'SELECT is_conference_member FROM members WHERE id=:id',
+      {'id': memberId.toString()});
+  if (r.rows.isEmpty) return false;
+  final val = r.rows.first.assoc()['is_conference_member'];
+  if (val == null) return false;
+  return val == 1 ||
+      val == true ||
+      val == '1' ||
+      (val is List && val.isNotEmpty && val[0] == 1);
+}
+
+Future<bool> _canEditConference(MySQLConnection conn, int memberId) async {
+  if (await _isSuper(conn, memberId)) return true;
+  return _isConferenceMember(conn, memberId);
+}
+
+bool _isTruthy(dynamic value) {
+  return value == 1 || value == true || value == '1';
+}
+
+String _normalizeConferenceStatus(String raw) {
+  const valid = {'new', 'under_review', 'accepted', 'declined'};
+  return valid.contains(raw) ? raw : '';
 }
 
 /// Get member's club_id
@@ -1457,8 +1489,6 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
 
   final overrideSubject = (bodyJson['subject'] as String?)?.trim();
   final overrideBodyHtml = (bodyJson['body_html'] as String?)?.trim();
-  final overrideBodyText = (bodyJson['body'] as String?)?.trim();
-
   MySQLConnection? conn;
   try {
     conn = await _connect();
@@ -1478,7 +1508,6 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
     final isOther = (event['event_type'] ?? '').toString() == 'Other';
 
     // Get club email settings
-    final emailSubdomain = event['email_subdomain']?.toString();
     final replyToEmail = event['reply_to_email']?.toString();
     final fromName = event['from_name']?.toString() ??
         event['club_name']?.toString() ??
@@ -1749,6 +1778,367 @@ Future<Response> _getAuditLogs(Request req) async {
         headers: {'Content-Type': 'application/json'});
   } catch (e, st) {
     stderr.writeln('❌ Error in _getAuditLogs: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _getConference(Request req) async {
+  stderr.writeln('🔵 GET /conference');
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) {
+      return Response(401, body: 'Unauthorized');
+    }
+
+    conn = await _connect();
+    final res = await conn.execute('''
+      SELECT c.id, c.title, c.conference_date, c.theme, c.locations_notes,
+             c.breakout_sessions_notes, c.general_notes, c.last_updated_by_member_id,
+             c.updated_at, m.name AS last_updated_by_name
+      FROM conference_content c
+      LEFT JOIN members m ON m.id = c.last_updated_by_member_id
+      ORDER BY c.id DESC
+      LIMIT 1
+    ''');
+
+    if (res.rows.isEmpty) {
+      return Response.ok(
+        jsonEncode({
+          'id': null,
+          'title': 'Conference',
+          'conference_date': null,
+          'theme': '',
+          'locations_notes': '',
+          'breakout_sessions_notes': '',
+          'general_notes': '',
+          'last_updated_by_member_id': null,
+          'last_updated_by_name': null,
+          'updated_at': null,
+        }),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+
+    final a = res.rows.first.assoc();
+    return Response.ok(
+      jsonEncode({
+        'id': a['id'],
+        'title': a['title'] ?? 'Conference',
+        'conference_date': a['conference_date']?.toString(),
+        'theme': a['theme'] ?? '',
+        'locations_notes': a['locations_notes'] ?? '',
+        'breakout_sessions_notes': a['breakout_sessions_notes'] ?? '',
+        'general_notes': a['general_notes'] ?? '',
+        'last_updated_by_member_id': a['last_updated_by_member_id'],
+        'last_updated_by_name': a['last_updated_by_name'],
+        'updated_at': a['updated_at']?.toString(),
+      }),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _getConference: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _saveConference(Request req) async {
+  stderr.writeln('🔵 PUT /conference');
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) {
+      return Response(401, body: 'Unauthorized');
+    }
+
+    conn = await _connect();
+    if (!await _canEditConference(conn, authMemberId)) {
+      return Response(403, body: 'Forbidden: conference team access required');
+    }
+
+    final raw = await req.readAsString();
+    if (raw.isEmpty) return Response(400, body: 'Missing body');
+    final bodyJson = jsonDecode(raw) as Map<String, dynamic>;
+
+    final title = bodyJson['title']?.toString().trim();
+    final conferenceDate = bodyJson['conference_date']?.toString().trim();
+    final theme = bodyJson['theme']?.toString().trim();
+    final locationsNotes = bodyJson['locations_notes']?.toString().trim();
+    final breakoutNotes = bodyJson['breakout_sessions_notes']?.toString().trim();
+    final generalNotes = bodyJson['general_notes']?.toString().trim();
+
+    final existingRes = await conn.execute(
+        'SELECT * FROM conference_content ORDER BY id DESC LIMIT 1');
+    final oldValue =
+        existingRes.rows.isNotEmpty ? existingRes.rows.first.assoc() : null;
+
+    final params = {
+      'title': (title == null || title.isEmpty) ? 'Conference' : title,
+      'conferenceDate':
+          (conferenceDate == null || conferenceDate.isEmpty) ? null : conferenceDate,
+      'theme': theme,
+      'locationsNotes': locationsNotes,
+      'breakoutNotes': breakoutNotes,
+      'generalNotes': generalNotes,
+      'memberId': authMemberId.toString(),
+    };
+
+    int conferenceId;
+    if (existingRes.rows.isEmpty) {
+      await conn.execute('''
+        INSERT INTO conference_content (
+          title, conference_date, theme, locations_notes,
+          breakout_sessions_notes, general_notes, last_updated_by_member_id
+        ) VALUES (
+          :title, :conferenceDate, :theme, :locationsNotes,
+          :breakoutNotes, :generalNotes, :memberId
+        )
+      ''', params);
+      final idRes = await conn.execute('SELECT LAST_INSERT_ID() AS id');
+      conferenceId = int.parse(idRes.rows.first.assoc()['id']!);
+      await _logAudit(
+        conn,
+        entityType: 'conference',
+        entityId: conferenceId,
+        action: 'CREATE',
+        changedByMemberId: authMemberId,
+        newValue: params,
+      );
+    } else {
+      conferenceId = int.parse(existingRes.rows.first.assoc()['id']!.toString());
+      await conn.execute('''
+        UPDATE conference_content
+        SET title = :title,
+            conference_date = :conferenceDate,
+            theme = :theme,
+            locations_notes = :locationsNotes,
+            breakout_sessions_notes = :breakoutNotes,
+            general_notes = :generalNotes,
+            last_updated_by_member_id = :memberId
+        WHERE id = :id
+      ''', {...params, 'id': conferenceId.toString()});
+      await _logAudit(
+        conn,
+        entityType: 'conference',
+        entityId: conferenceId,
+        action: 'UPDATE',
+        changedByMemberId: authMemberId,
+        oldValue: oldValue,
+        newValue: params,
+      );
+    }
+
+    return Response.ok(jsonEncode({'id': conferenceId}),
+        headers: {'Content-Type': 'application/json'});
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _saveConference: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _getConferenceIdeas(Request req) async {
+  stderr.writeln('🔵 GET /conference_ideas');
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) {
+      return Response(401, body: 'Unauthorized');
+    }
+
+    conn = await _connect();
+    final res = await conn.execute('''
+      SELECT i.id, i.title, i.description, i.category, i.status,
+             i.created_by_member_id, i.created_at, i.updated_at,
+             m.name AS created_by_name
+      FROM conference_ideas i
+      LEFT JOIN members m ON m.id = i.created_by_member_id
+      ORDER BY FIELD(i.status, 'new', 'under_review', 'accepted', 'declined'),
+               i.created_at DESC, i.id DESC
+    ''');
+
+    final ideas = res.rows.map((row) {
+      final a = row.assoc();
+      return {
+        'id': a['id'],
+        'title': a['title'] ?? '',
+        'description': a['description'] ?? '',
+        'category': a['category'] ?? '',
+        'status': a['status'] ?? 'new',
+        'created_by_member_id': a['created_by_member_id'],
+        'created_by_name': a['created_by_name'] ?? 'Unknown',
+        'created_at': a['created_at']?.toString(),
+        'updated_at': a['updated_at']?.toString(),
+      };
+    }).toList();
+
+    return Response.ok(jsonEncode(ideas),
+        headers: {'Content-Type': 'application/json'});
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _getConferenceIdeas: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _createConferenceIdea(Request req) async {
+  stderr.writeln('🔵 POST /conference_ideas');
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) {
+      return Response(401, body: 'Unauthorized');
+    }
+
+    final raw = await req.readAsString();
+    if (raw.isEmpty) return Response(400, body: 'Missing body');
+    final bodyJson = jsonDecode(raw) as Map<String, dynamic>;
+
+    final title = bodyJson['title']?.toString().trim() ?? '';
+    final description = bodyJson['description']?.toString().trim() ?? '';
+    final category = bodyJson['category']?.toString().trim() ?? '';
+    if (title.isEmpty) {
+      return Response(400, body: 'Title is required');
+    }
+
+    conn = await _connect();
+    await conn.execute('''
+      INSERT INTO conference_ideas (title, description, category, status, created_by_member_id)
+      VALUES (:title, :description, :category, 'new', :memberId)
+    ''', {
+      'title': title,
+      'description': description,
+      'category': category,
+      'memberId': authMemberId.toString(),
+    });
+
+    final idRes = await conn.execute('SELECT LAST_INSERT_ID() AS id');
+    final newId = int.parse(idRes.rows.first.assoc()['id']!);
+    await _logAudit(
+      conn,
+      entityType: 'conference_idea',
+      entityId: newId,
+      action: 'CREATE',
+      changedByMemberId: authMemberId,
+      newValue: {
+        'title': title,
+        'description': description,
+        'category': category,
+        'status': 'new',
+      },
+    );
+
+    return Response(201,
+        body: jsonEncode({'id': newId}),
+        headers: {'Content-Type': 'application/json'});
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _createConferenceIdea: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _updateConferenceIdeaStatus(Request req, String idStr) async {
+  stderr.writeln('🔵 PUT /conference_ideas/$idStr/status');
+  final ideaId = int.tryParse(idStr);
+  if (ideaId == null) return Response.badRequest(body: 'Invalid idea ID');
+
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) {
+      return Response(401, body: 'Unauthorized');
+    }
+
+    conn = await _connect();
+    if (!await _canEditConference(conn, authMemberId)) {
+      return Response(403, body: 'Forbidden: conference team access required');
+    }
+
+    final raw = await req.readAsString();
+    if (raw.isEmpty) return Response(400, body: 'Missing body');
+    final bodyJson = jsonDecode(raw) as Map<String, dynamic>;
+    final status = _normalizeConferenceStatus(
+        bodyJson['status']?.toString().trim() ?? '');
+    if (status.isEmpty) {
+      return Response(400, body: 'Invalid status');
+    }
+
+    final oldRes = await conn.execute(
+        'SELECT * FROM conference_ideas WHERE id = :id', {'id': ideaId.toString()});
+    if (oldRes.rows.isEmpty) return Response.notFound('Idea not found');
+    final oldValue = oldRes.rows.first.assoc();
+
+    await conn.execute('''
+      UPDATE conference_ideas
+      SET status = :status
+      WHERE id = :id
+    ''', {'status': status, 'id': ideaId.toString()});
+
+    await _logAudit(
+      conn,
+      entityType: 'conference_idea',
+      entityId: ideaId,
+      action: 'UPDATE',
+      changedByMemberId: authMemberId,
+      oldValue: oldValue,
+      newValue: {'status': status},
+    );
+
+    return Response.ok(jsonEncode({'success': true}),
+        headers: {'Content-Type': 'application/json'});
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _updateConferenceIdeaStatus: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _deleteConferenceIdea(Request req, String idStr) async {
+  stderr.writeln('🔵 DELETE /conference_ideas/$idStr');
+  final ideaId = int.tryParse(idStr);
+  if (ideaId == null) return Response.badRequest(body: 'Invalid idea ID');
+
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) {
+      return Response(401, body: 'Unauthorized');
+    }
+
+    conn = await _connect();
+    if (!await _canEditConference(conn, authMemberId)) {
+      return Response(403, body: 'Forbidden: conference team access required');
+    }
+
+    final oldRes = await conn.execute(
+        'SELECT * FROM conference_ideas WHERE id = :id', {'id': ideaId.toString()});
+    if (oldRes.rows.isEmpty) return Response.notFound('Idea not found');
+    final oldValue = oldRes.rows.first.assoc();
+
+    await conn.execute(
+        'DELETE FROM conference_ideas WHERE id = :id', {'id': ideaId.toString()});
+
+    await _logAudit(
+      conn,
+      entityType: 'conference_idea',
+      entityId: ideaId,
+      action: 'DELETE',
+      changedByMemberId: authMemberId,
+      oldValue: oldValue,
+    );
+
+    return Response(204);
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _deleteConferenceIdea: $e\n$st');
     return Response.internalServerError(body: 'Error: $e');
   } finally {
     await conn?.close();
@@ -2468,6 +2858,16 @@ Future<Response> _reportClubComparison(Request req) async {
 Handler _router() {
   final router = Router();
 
+  // ============ CONFERENCE ROUTES ============
+  router.get('/conference', _getConference);
+  router.put('/conference', _saveConference);
+  router.get('/conference_ideas', _getConferenceIdeas);
+  router.post('/conference_ideas', _createConferenceIdea);
+  router.put('/conference_ideas/<id>/status',
+      (Request req, String id) => _updateConferenceIdeaStatus(req, id));
+  router.delete('/conference_ideas/<id>',
+      (Request req, String id) => _deleteConferenceIdea(req, id));
+
   // ============ MEMBERS ROUTES ============
   router.post('/members', _createMember);
   router.get('/members', _members);
@@ -2561,7 +2961,9 @@ Future<Response> _createMember(Request req) async {
     final email = bodyJson['email']?.toString() ?? '';
     final phoneNumber = bodyJson['phone_number']?.toString() ?? '';
     final clubId = bodyJson['lions_club_id'];
-    final isAdmin = (bodyJson['is_admin'] == true) ? 1 : 0;
+    final isAdmin = _isTruthy(bodyJson['is_admin']) ? 1 : 0;
+    final isConferenceMember =
+      _isTruthy(bodyJson['is_conference_member']) ? 1 : 0;
 
     if (name.isEmpty || clubId == null) {
       return Response(400,
@@ -2576,12 +2978,13 @@ Future<Response> _createMember(Request req) async {
       'email': email,
       'phone': phoneNumber,
       'club': clubId.toString(),
-      'admin': isAdmin
+      'admin': isAdmin,
+      'conferenceMember': isConferenceMember,
     };
 
     await conn.execute('''
-      INSERT INTO members (name, email, phone_number, lions_club_id, is_admin)
-      VALUES (:name, :email, :phone, :club, :admin)
+      INSERT INTO members (name, email, phone_number, lions_club_id, is_admin, is_conference_member)
+      VALUES (:name, :email, :phone, :club, :admin, :conferenceMember)
     ''', params);
 
     final idRes = await conn.execute('SELECT LAST_INSERT_ID() AS id');
@@ -2672,6 +3075,11 @@ Future<Response> _updateMember(Request req, String idStr) async {
         updates.add('is_admin = :isAdmin');
         params['isAdmin'] =
             data['is_admin'] == 1 || data['is_admin'] == true ? 1 : 0;
+      }
+      if (isSuper && data.containsKey('is_conference_member')) {
+        updates.add('is_conference_member = :isConferenceMember');
+        params['isConferenceMember'] =
+            _isTruthy(data['is_conference_member']) ? 1 : 0;
       }
     }
 
