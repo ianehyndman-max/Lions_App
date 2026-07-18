@@ -1,5 +1,20 @@
-ALTER TABLE members
-  ADD COLUMN IF NOT EXISTS is_conference_member TINYINT(1) NOT NULL DEFAULT 0 AFTER is_super;
+SET @add_conference_member_column = (
+  SELECT IF(
+    EXISTS(
+      SELECT 1
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'members'
+        AND COLUMN_NAME = 'is_conference_member'
+    ),
+    'SELECT 1',
+    'ALTER TABLE members ADD COLUMN is_conference_member TINYINT(1) NOT NULL DEFAULT 0 AFTER is_super'
+  )
+);
+
+PREPARE stmt_add_conference_member_column FROM @add_conference_member_column;
+EXECUTE stmt_add_conference_member_column;
+DEALLOCATE PREPARE stmt_add_conference_member_column;
 
 CREATE TABLE IF NOT EXISTS conference_content (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
