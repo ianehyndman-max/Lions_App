@@ -385,8 +385,17 @@ bool _isTruthy(dynamic value) {
 }
 
 String _normalizeConferenceStatus(String raw) {
-  const valid = {'new', 'under_review', 'accepted', 'declined'};
-  return valid.contains(raw) ? raw : '';
+  final normalized = raw.trim().toLowerCase().replaceAll('-', '_').replaceAll(' ', '_');
+  const aliases = {
+    'new': 'new',
+    'under_review': 'under_review',
+    'in_review': 'under_review',
+    'accepted': 'accepted',
+    'approved': 'accepted',
+    'declined': 'declined',
+    'rejected': 'declined',
+  };
+  return aliases[normalized] ?? '';
 }
 
 const Set<String> _allowedAttachmentMimeTypes = {
@@ -3628,11 +3637,6 @@ Future<Response> _updateConferenceIdeaStatus(Request req, String idStr) async {
       return Response(401, body: 'Unauthorized');
     }
 
-    conn = await _connect();
-    if (!await _canEditConference(conn, authMemberId)) {
-      return Response(403, body: 'Forbidden: conference team access required');
-    }
-
     final raw = await req.readAsString();
     if (raw.isEmpty) return Response(400, body: 'Missing body');
     final bodyJson = jsonDecode(raw) as Map<String, dynamic>;
@@ -3642,11 +3646,23 @@ Future<Response> _updateConferenceIdeaStatus(Request req, String idStr) async {
       return Response(400, body: 'Invalid status');
     }
 
+    conn = await _connect();
+
     final oldRes = await conn.execute(
         'SELECT * FROM conference_ideas WHERE id = :id',
         {'id': ideaId.toString()});
     if (oldRes.rows.isEmpty) return Response.notFound('Idea not found');
     final oldValue = oldRes.rows.first.assoc();
+
+    final canModerate = await _canEditConference(conn, authMemberId);
+    final createdByMemberId =
+        int.tryParse(oldValue['created_by_member_id']?.toString() ?? '');
+    if (!canModerate && createdByMemberId != authMemberId) {
+      return Response(
+        403,
+        body: 'Forbidden: conference team or idea owner access required',
+      );
+    }
 
     await conn.execute('''
       UPDATE conference_ideas
