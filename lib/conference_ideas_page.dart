@@ -18,6 +18,8 @@ class _ConferenceIdeasPageState extends State<ConferenceIdeasPage> {
   bool _canModerate = false;
   String? _error;
 
+  int? _ideaIdFrom(dynamic value) => int.tryParse(value?.toString() ?? '');
+
   @override
   void initState() {
     super.initState();
@@ -303,10 +305,19 @@ class _ConferenceIdeasPageState extends State<ConferenceIdeasPage> {
                                     if (_canModerate)
                                       PopupMenuButton<String>(
                                         onSelected: (value) {
+                                          final ideaId = _ideaIdFrom(idea['id']);
+                                          if (ideaId == null) {
+                                            if (!mounted) return;
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              const SnackBar(
+                                                  content: Text('Invalid idea id')),
+                                            );
+                                            return;
+                                          }
                                           if (value == 'delete') {
-                                            _deleteIdea((idea['id'] as num).toInt());
+                                            _deleteIdea(ideaId);
                                           } else {
-                                            _updateStatus((idea['id'] as num).toInt(), value);
+                                            _updateStatus(ideaId, value);
                                           }
                                         },
                                         itemBuilder: (context) => const [
