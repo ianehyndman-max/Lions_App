@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:async';
+import 'package:crypto/crypto.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as io;
 import 'package:shelf_router/shelf_router.dart';
@@ -52,7 +53,67 @@ final _dbName = _envOr('DB_NAME', 'lions');
 final _smtpUser = _envOr('SMTP_USER', '');
 final _smtpPass = _envOr('SMTP_PASS', '');
 
+final _attachmentsBucket = _envOr('ATTACHMENTS_S3_BUCKET', '');
+final _attachmentsRegion = _envOr('ATTACHMENTS_S3_REGION', 'ap-southeast-2');
+final _attachmentsMaxBytes =
+    int.tryParse(_envOr('ATTACHMENTS_MAX_BYTES', '10485760')) ?? 10485760;
+final _attachmentsHardCapBytes =
+    int.tryParse(_envOr('ATTACHMENTS_HARD_CAP_BYTES', '15728640')) ?? 15728640;
+final _attachmentsPresignMode = _envOr('ATTACHMENTS_PRESIGN_MODE', 'mock');
+final _attachmentsDownloadTtlSeconds =
+    int.tryParse(_envOr('ATTACHMENTS_DOWNLOAD_TTL_SECONDS', '600')) ?? 600;
+final _attachmentsDownloadTokenSecret = _envOr(
+  'ATTACHMENTS_DOWNLOAD_TOKEN_SECRET',
+  _dbPass.isNotEmpty ? _dbPass : 'dev-attachment-secret',
+);
+final _attachmentsAwsAccessKeyId = _envOr(
+  'ATTACHMENTS_AWS_ACCESS_KEY_ID',
+  Platform.environment['AWS_ACCESS_KEY_ID'] ?? '',
+);
+final _attachmentsAwsSecretAccessKey = _envOr(
+  'ATTACHMENTS_AWS_SECRET_ACCESS_KEY',
+  Platform.environment['AWS_SECRET_ACCESS_KEY'] ?? '',
+);
+final _attachmentsAwsSessionToken = _envOr(
+  'ATTACHMENTS_AWS_SESSION_TOKEN',
+  Platform.environment['AWS_SESSION_TOKEN'] ?? '',
+);
+const _mockAttachmentsBucket = 'local-mock';
+final _mockAttachmentsDir = _envOr(
+  'ATTACHMENTS_MOCK_DIR',
+  p.join(Directory.systemTemp.path, 'lions_mock_attachments'),
+);
+
 // ---------------- DB connect ----------------
+Future<void> _ensureConferenceSectionParentColumn(MySQLConnection conn) async {
+  try {
+    final res = await conn.execute('''
+      SELECT COUNT(*) AS cnt
+      FROM information_schema.columns
+      WHERE table_schema = DATABASE()
+        AND table_name = 'conference_sections'
+        AND column_name = 'parent_id'
+    ''');
+    final count =
+        int.tryParse(res.rows.first.assoc()['cnt']?.toString() ?? '0') ?? 0;
+    if (count > 0) {
+      return;
+    }
+
+    await conn.execute('''
+      ALTER TABLE conference_sections
+      ADD COLUMN parent_id BIGINT NULL DEFAULT NULL AFTER sort_order
+    ''');
+    await conn.execute('''
+      ALTER TABLE conference_sections
+      ADD INDEX idx_conference_sections_parent (parent_id, sort_order)
+    ''');
+  } catch (e) {
+    stderr
+        .writeln('⚠️ Could not ensure conference section parent_id column: $e');
+  }
+}
+
 Future<MySQLConnection> _connect() async {
   debugDbDiagnostics(
       dbHost: _dbHost,
@@ -70,6 +131,7 @@ Future<MySQLConnection> _connect() async {
   );
   await conn.connect();
   stderr.writeln('✅ Connected to MySQL at $_dbHost:$_dbPort ($_dbName)');
+  await _ensureConferenceSectionParentColumn(conn);
   return conn;
 }
 
@@ -227,16 +289,19 @@ Future<Response> _members(Request req) async {
     final list = <Map<String, dynamic>>[];
     for (final row in result.rows) {
       final a = row.assoc();
-        // Ensure permission flags are integers
+      // Ensure permission flags are integers
       final isAdminVal = a['is_admin'];
       final isSuperVal = a['is_super'];
-        final isConferenceVal = a['is_conference_member'];
+      final isConferenceVal = a['is_conference_member'];
       final isAdminInt =
           (isAdminVal == 1 || isAdminVal == true || isAdminVal == '1') ? 1 : 0;
       final isSuperInt =
           (isSuperVal == 1 || isSuperVal == true || isSuperVal == '1') ? 1 : 0;
-        final isConferenceInt =
-          (isConferenceVal == 1 || isConferenceVal == true || isConferenceVal == '1') ? 1 : 0;
+      final isConferenceInt = (isConferenceVal == 1 ||
+              isConferenceVal == true ||
+              isConferenceVal == '1')
+          ? 1
+          : 0;
 
       list.add({
         'id': a['id'],
@@ -322,6 +387,211 @@ bool _isTruthy(dynamic value) {
 String _normalizeConferenceStatus(String raw) {
   const valid = {'new', 'under_review', 'accepted', 'declined'};
   return valid.contains(raw) ? raw : '';
+}
+
+const Set<String> _allowedAttachmentMimeTypes = {
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'text/plain',
+};
+
+String _sanitizeFilename(String filename) {
+  final trimmed = filename.trim();
+  if (trimmed.isEmpty) return 'upload';
+  final noPath = trimmed.replaceAll('\\', '/').split('/').last;
+  return noPath.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+}
+
+String _detectAttachmentKind(String mimeType) {
+  if (mimeType.startsWith('image/')) return 'image';
+  return 'document';
+}
+
+String? _normalizeMockStorageKey(String storageKey) {
+  final normalized = p.normalize(storageKey).replaceAll('\\', '/').trim();
+  if (normalized.isEmpty || normalized.startsWith('/')) return null;
+  if (normalized.contains('..')) return null;
+  return normalized;
+}
+
+String _mockAttachmentPath(String storageKey) {
+  return p.join(_mockAttachmentsDir, storageKey);
+}
+
+Future<void> _writeMockAttachmentBytes(
+    String storageKey, List<int> bytes) async {
+  final file = File(_mockAttachmentPath(storageKey));
+  await file.parent.create(recursive: true);
+  await file.writeAsBytes(bytes, flush: true);
+}
+
+Future<List<int>?> _readMockAttachmentBytes(String storageKey) async {
+  final file = File(_mockAttachmentPath(storageKey));
+  if (!await file.exists()) return null;
+  return file.readAsBytes();
+}
+
+String _awsUriEncode(String value, {bool encodeSlash = true}) {
+  final bytes = utf8.encode(value);
+  final out = StringBuffer();
+  const unreserved =
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~';
+  for (final b in bytes) {
+    final ch = String.fromCharCode(b);
+    if (unreserved.contains(ch)) {
+      out.write(ch);
+    } else if (!encodeSlash && ch == '/') {
+      out.write('/');
+    } else {
+      out.write('%${b.toRadixString(16).toUpperCase().padLeft(2, '0')}');
+    }
+  }
+  return out.toString();
+}
+
+String _sha256Hex(String input) {
+  final digest = sha256.convert(utf8.encode(input));
+  return _hexDigest(digest.bytes);
+}
+
+List<int> _hmacSha256(List<int> key, String input) {
+  return Hmac(sha256, key).convert(utf8.encode(input)).bytes;
+}
+
+String _twoDigits(int n) => n.toString().padLeft(2, '0');
+
+String _fourDigits(int n) => n.toString().padLeft(4, '0');
+
+String _amzDate(DateTime utc) {
+  return '${_fourDigits(utc.year)}${_twoDigits(utc.month)}${_twoDigits(utc.day)}T${_twoDigits(utc.hour)}${_twoDigits(utc.minute)}${_twoDigits(utc.second)}Z';
+}
+
+String _dateStamp(DateTime utc) {
+  return '${_fourDigits(utc.year)}${_twoDigits(utc.month)}${_twoDigits(utc.day)}';
+}
+
+String? _buildPresignedS3GetUrl({
+  required String bucket,
+  required String storageKey,
+  int expiresSeconds = 300,
+}) {
+  final normalizedBucket = bucket.trim();
+  final normalizedStorageKey = storageKey.trim();
+  if (normalizedBucket.isEmpty || normalizedStorageKey.isEmpty) return null;
+  if (_attachmentsAwsAccessKeyId.isEmpty ||
+      _attachmentsAwsSecretAccessKey.isEmpty) {
+    return null;
+  }
+
+  final safeExpires = expiresSeconds.clamp(1, 604800);
+  final now = DateTime.now().toUtc();
+  final amzDate = _amzDate(now);
+  final dateStamp = _dateStamp(now);
+  final service = 's3';
+  final scope = '$dateStamp/$_attachmentsRegion/$service/aws4_request';
+  final host = '$normalizedBucket.s3.$_attachmentsRegion.amazonaws.com';
+  final canonicalUri =
+      '/${_awsUriEncode(normalizedStorageKey, encodeSlash: false)}';
+
+  final query = <String, String>{
+    'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
+    'X-Amz-Credential': '${_attachmentsAwsAccessKeyId}/$scope',
+    'X-Amz-Date': amzDate,
+    'X-Amz-Expires': safeExpires.toString(),
+    'X-Amz-SignedHeaders': 'host',
+  };
+  if (_attachmentsAwsSessionToken.isNotEmpty) {
+    query['X-Amz-Security-Token'] = _attachmentsAwsSessionToken;
+  }
+
+  final sortedKeys = query.keys.toList()..sort();
+  final canonicalQuery = sortedKeys
+      .map((k) => '${_awsUriEncode(k)}=${_awsUriEncode(query[k]!)}')
+      .join('&');
+
+  final canonicalRequest = [
+    'GET',
+    canonicalUri,
+    canonicalQuery,
+    'host:$host\n',
+    'host',
+    'UNSIGNED-PAYLOAD',
+  ].join('\n');
+
+  final stringToSign = [
+    'AWS4-HMAC-SHA256',
+    amzDate,
+    scope,
+    _sha256Hex(canonicalRequest),
+  ].join('\n');
+
+  final kDate = _hmacSha256(
+      utf8.encode('AWS4$_attachmentsAwsSecretAccessKey'), dateStamp);
+  final kRegion = _hmacSha256(kDate, _attachmentsRegion);
+  final kService = _hmacSha256(kRegion, service);
+  final kSigning = _hmacSha256(kService, 'aws4_request');
+  final signature = _hexDigest(
+      Hmac(sha256, kSigning).convert(utf8.encode(stringToSign)).bytes);
+
+  return 'https://$host$canonicalUri?$canonicalQuery&X-Amz-Signature=$signature';
+}
+
+String _hexDigest(List<int> bytes) {
+  final b = StringBuffer();
+  for (final byte in bytes) {
+    b.write(byte.toRadixString(16).padLeft(2, '0'));
+  }
+  return b.toString();
+}
+
+String _buildAttachmentDownloadToken({
+  required int attachmentId,
+  required int memberId,
+  required int expiresEpochSeconds,
+}) {
+  final payload = '$attachmentId:$memberId:$expiresEpochSeconds';
+  final key = utf8.encode(_attachmentsDownloadTokenSecret);
+  final digest = Hmac(sha256, key).convert(utf8.encode(payload));
+  return _hexDigest(digest.bytes);
+}
+
+String _buildSignedAttachmentDownloadPath({
+  required int attachmentId,
+  required int memberId,
+}) {
+  final nowSeconds = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+  final expires = nowSeconds + _attachmentsDownloadTtlSeconds;
+  final token = _buildAttachmentDownloadToken(
+    attachmentId: attachmentId,
+    memberId: memberId,
+    expiresEpochSeconds: expires,
+  );
+  return '/conference_attachments/$attachmentId/content?viewer_member_id=$memberId&expires=$expires&token=$token';
+}
+
+bool _isValidSignedAttachmentRequest({
+  required int attachmentId,
+  required int memberId,
+  required int expiresEpochSeconds,
+  required String token,
+}) {
+  final nowSeconds = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+  if (expiresEpochSeconds <= nowSeconds) return false;
+  final expected = _buildAttachmentDownloadToken(
+    attachmentId: attachmentId,
+    memberId: memberId,
+    expiresEpochSeconds: expiresEpochSeconds,
+  );
+  return token == expected;
 }
 
 /// Get member's club_id
@@ -625,7 +895,8 @@ Future<Response> _createEvent(Request req) async {
         }
         stderr.writeln('✅ Copied ${templatesRes.rows.length} role templates');
       } else {
-        stderr.writeln('ℹ️ No role templates found for event type $eventTypeId');
+        stderr
+            .writeln('ℹ️ No role templates found for event type $eventTypeId');
       }
     }
 
@@ -1116,8 +1387,8 @@ Future<Response> _saveDinnerMealOption(Request req) async {
 
     final optionId = bodyJson['id'];
     final name = bodyJson['name']?.toString().trim() ?? '';
-    final sortOrder = int.tryParse(bodyJson['sort_order']?.toString() ?? '') ??
-        999;
+    final sortOrder =
+        int.tryParse(bodyJson['sort_order']?.toString() ?? '') ?? 999;
 
     if (name.isEmpty) {
       return Response(400, body: 'Meal option name required');
@@ -1372,7 +1643,7 @@ Future<Response> _assignVolunteer(Request req, String eventId) async {
     final memberIdRaw = bodyJson['member_id'];
     final mealChoiceRaw = bodyJson['meal_choice']?.toString().trim();
     final mealChoice =
-      (mealChoiceRaw == null || mealChoiceRaw.isEmpty) ? null : mealChoiceRaw;
+        (mealChoiceRaw == null || mealChoiceRaw.isEmpty) ? null : mealChoiceRaw;
 
     if (roleId == null) {
       return Response(400, body: 'Missing required field: role_id');
@@ -1794,6 +2065,8 @@ Future<Response> _getConference(Request req) async {
     }
 
     conn = await _connect();
+    final includeArchived =
+        req.url.queryParameters['include_archived']?.toLowerCase() == 'true';
     final res = await conn.execute('''
       SELECT c.id, c.title, c.conference_date, c.theme, c.locations_notes,
              c.breakout_sessions_notes, c.general_notes, c.last_updated_by_member_id,
@@ -1817,12 +2090,19 @@ Future<Response> _getConference(Request req) async {
           'last_updated_by_member_id': null,
           'last_updated_by_name': null,
           'updated_at': null,
+          'sections': <Map<String, dynamic>>[],
         }),
         headers: {'Content-Type': 'application/json'},
       );
     }
 
     final a = res.rows.first.assoc();
+    final conferenceId = int.parse(a['id'].toString());
+    final sections = await _listConferenceSections(
+      conn,
+      conferenceId,
+      includeArchived: includeArchived,
+    );
     return Response.ok(
       jsonEncode({
         'id': a['id'],
@@ -1835,11 +2115,1299 @@ Future<Response> _getConference(Request req) async {
         'last_updated_by_member_id': a['last_updated_by_member_id'],
         'last_updated_by_name': a['last_updated_by_name'],
         'updated_at': a['updated_at']?.toString(),
+        'sections': sections,
       }),
       headers: {'Content-Type': 'application/json'},
     );
   } catch (e, st) {
     stderr.writeln('❌ Error in _getConference: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<List<Map<String, dynamic>>> _listConferenceSections(
+  MySQLConnection conn,
+  int conferenceId, {
+  bool includeArchived = false,
+}) async {
+  final res = await conn.execute('''
+    SELECT s.id, s.conference_content_id, s.section_title, s.section_body,
+           s.sort_order, s.parent_id, s.status, s.archived_at, s.archived_by_member_id,
+           s.created_by_member_id, s.updated_by_member_id, s.created_at, s.updated_at,
+           m.name AS created_by_name
+    FROM conference_sections s
+    LEFT JOIN members m ON m.id = s.created_by_member_id
+    WHERE s.conference_content_id = :conferenceId
+      AND (:includeArchived = 'true' OR s.status <> 'archived')
+    ORDER BY s.sort_order ASC, s.id ASC
+  ''', {
+    'conferenceId': conferenceId.toString(),
+    'includeArchived': includeArchived.toString(),
+  });
+
+  return res.rows.map((row) {
+    final a = row.assoc();
+    return {
+      'id': a['id'],
+      'conference_content_id': a['conference_content_id'],
+      'section_title': a['section_title'] ?? '',
+      'section_body': a['section_body'] ?? '',
+      'sort_order': a['sort_order'] ?? 0,
+      'parent_id': a['parent_id'],
+      'status': a['status'] ?? 'draft',
+      'archived_at': a['archived_at']?.toString(),
+      'archived_by_member_id': a['archived_by_member_id'],
+      'created_by_member_id': a['created_by_member_id'],
+      'updated_by_member_id': a['updated_by_member_id'],
+      'created_by_name': a['created_by_name'],
+      'created_at': a['created_at']?.toString(),
+      'updated_at': a['updated_at']?.toString(),
+    };
+  }).toList();
+}
+
+Future<int> _ensureConferenceContent(
+    MySQLConnection conn, int authMemberId) async {
+  final existingRes = await conn
+      .execute('SELECT id FROM conference_content ORDER BY id DESC LIMIT 1');
+  if (existingRes.rows.isNotEmpty) {
+    return int.parse(existingRes.rows.first.assoc()['id'].toString());
+  }
+
+  await conn.execute('''
+    INSERT INTO conference_content (title, last_updated_by_member_id)
+    VALUES ('Conference', :memberId)
+  ''', {'memberId': authMemberId.toString()});
+  final idRes = await conn.execute('SELECT LAST_INSERT_ID() AS id');
+  return int.parse(idRes.rows.first.assoc()['id']!);
+}
+
+Future<Response> _createConferenceSection(Request req) async {
+  stderr.writeln('🔵 POST /conference_sections');
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) {
+      return Response(401, body: 'Unauthorized');
+    }
+
+    final raw = await req.readAsString();
+    if (raw.isEmpty) return Response(400, body: 'Missing body');
+    final bodyJson = jsonDecode(raw) as Map<String, dynamic>;
+    final title = bodyJson['section_title']?.toString().trim() ?? '';
+    final body = bodyJson['section_body']?.toString().trim() ?? '';
+    final sortOrder = int.tryParse(bodyJson['sort_order']?.toString() ?? '');
+    final parentIdValue = bodyJson['parent_id'];
+    int? parentId;
+    if (parentIdValue != null && parentIdValue.toString().trim().isNotEmpty) {
+      parentId = int.tryParse(parentIdValue.toString());
+      if (parentId == null) {
+        return Response(400, body: 'parent_id must be an integer');
+      }
+    }
+    if (title.isEmpty) return Response(400, body: 'Section title is required');
+
+    conn = await _connect();
+    if (!await _canEditConference(conn, authMemberId)) {
+      return Response(403, body: 'Forbidden: conference team access required');
+    }
+
+    final conferenceId = await _ensureConferenceContent(conn, authMemberId);
+    int finalSortOrder = sortOrder ?? 0;
+    if (sortOrder == null) {
+      final maxRes = await conn.execute('''
+          SELECT COALESCE(MAX(sort_order), -1) AS max_sort
+          FROM conference_sections
+          WHERE conference_content_id = :conferenceId
+            AND (
+              (:parentId IS NULL AND parent_id IS NULL)
+              OR parent_id = :parentId
+            )
+        ''', {
+        'conferenceId': conferenceId.toString(),
+        'parentId': parentId?.toString(),
+      });
+      final maxSort = int.tryParse(
+              maxRes.rows.first.assoc()['max_sort']?.toString() ?? '-1') ??
+          -1;
+      finalSortOrder = maxSort + 1;
+    }
+
+    if (parentId != null) {
+      final parentRes = await conn.execute(
+        'SELECT id, conference_content_id FROM conference_sections WHERE id = :id',
+        {'id': parentId.toString()},
+      );
+      if (parentRes.rows.isEmpty) {
+        return Response(400, body: 'Parent section not found');
+      }
+      final parentRow = parentRes.rows.first.assoc();
+      if (parentRow['conference_content_id']?.toString() !=
+          conferenceId.toString()) {
+        return Response(400,
+            body: 'Parent section must belong to the same conference');
+      }
+    }
+
+    await conn.execute('''
+      INSERT INTO conference_sections (
+        conference_content_id, section_title, section_body, sort_order, parent_id,
+        created_by_member_id, updated_by_member_id, status
+      ) VALUES (
+        :conferenceId, :sectionTitle, :sectionBody, :sortOrder, :parentId,
+        :memberId, :memberId, 'draft'
+      )
+    ''', {
+      'conferenceId': conferenceId.toString(),
+      'sectionTitle': title,
+      'sectionBody': body,
+      'sortOrder': finalSortOrder.toString(),
+      'parentId': parentId?.toString(),
+      'memberId': authMemberId.toString(),
+    });
+
+    final idRes = await conn.execute('SELECT LAST_INSERT_ID() AS id');
+    final sectionId = int.parse(idRes.rows.first.assoc()['id']!);
+
+    await _logAudit(
+      conn,
+      entityType: 'conference_section',
+      entityId: sectionId,
+      action: 'CREATE',
+      changedByMemberId: authMemberId,
+      newValue: {
+        'conference_content_id': conferenceId,
+        'section_title': title,
+        'section_body': body,
+        'sort_order': finalSortOrder,
+        'parent_id': parentId,
+        'status': 'draft',
+      },
+    );
+
+    return Response(201,
+        body: jsonEncode({'id': sectionId}),
+        headers: {'Content-Type': 'application/json'});
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _createConferenceSection: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _updateConferenceSection(Request req, String idStr) async {
+  stderr.writeln('🔵 PUT /conference_sections/$idStr');
+  final sectionId = int.tryParse(idStr);
+  if (sectionId == null) return Response.badRequest(body: 'Invalid section ID');
+
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) {
+      return Response(401, body: 'Unauthorized');
+    }
+
+    final raw = await req.readAsString();
+    if (raw.isEmpty) return Response(400, body: 'Missing body');
+    final bodyJson = jsonDecode(raw) as Map<String, dynamic>;
+
+    conn = await _connect();
+    if (!await _canEditConference(conn, authMemberId)) {
+      return Response(403, body: 'Forbidden: conference team access required');
+    }
+
+    final oldRes = await conn.execute(
+        'SELECT * FROM conference_sections WHERE id = :id',
+        {'id': sectionId.toString()});
+    if (oldRes.rows.isEmpty) return Response.notFound('Section not found');
+    final oldValue = oldRes.rows.first.assoc();
+
+    final oldTitle = oldValue['section_title']?.toString() ?? '';
+    final oldBody = oldValue['section_body']?.toString() ?? '';
+    final oldSortOrder =
+        int.tryParse(oldValue['sort_order']?.toString() ?? '0') ?? 0;
+    final oldParentId = int.tryParse(oldValue['parent_id']?.toString() ?? '');
+    final oldStatus = oldValue['status']?.toString() ?? 'draft';
+
+    final hasTitle = bodyJson.containsKey('section_title');
+    final hasBody = bodyJson.containsKey('section_body');
+    final hasSortOrder = bodyJson.containsKey('sort_order');
+    final hasParentId = bodyJson.containsKey('parent_id');
+    final hasStatus = bodyJson.containsKey('status');
+
+    final newTitle = hasTitle
+        ? (bodyJson['section_title']?.toString().trim() ?? '')
+        : oldTitle;
+    if (newTitle.isEmpty) {
+      return Response(400, body: 'Section title is required');
+    }
+    final newBody =
+        hasBody ? (bodyJson['section_body']?.toString().trim() ?? '') : oldBody;
+    var newSortOrder = hasSortOrder
+        ? (int.tryParse(bodyJson['sort_order']?.toString() ?? '') ??
+            oldSortOrder)
+        : oldSortOrder;
+    final newStatus = hasStatus
+        ? (bodyJson['status']?.toString().trim() ?? oldStatus)
+        : oldStatus;
+    int? newParentId;
+    if (hasParentId) {
+      final rawParentId = bodyJson['parent_id'];
+      if (rawParentId == null || rawParentId.toString().trim().isEmpty) {
+        newParentId = null;
+      } else {
+        newParentId = int.tryParse(rawParentId.toString());
+        if (newParentId == null) {
+          return Response(400, body: 'parent_id must be an integer');
+        }
+      }
+    } else {
+      newParentId = oldParentId;
+    }
+    if (newParentId == sectionId) {
+      return Response(400, body: 'A section cannot be its own parent');
+    }
+    if (newParentId != null) {
+      final parentRes = await conn.execute(
+        'SELECT id, parent_id FROM conference_sections WHERE id = :id',
+        {'id': newParentId.toString()},
+      );
+      if (parentRes.rows.isEmpty) {
+        return Response(400, body: 'Parent section not found');
+      }
+      var currentParentId = int.tryParse(
+          parentRes.rows.first.assoc()['parent_id']?.toString() ?? '');
+      while (currentParentId != null) {
+        if (currentParentId == sectionId) {
+          return Response(400,
+              body: 'Parent nesting would create a circular reference');
+        }
+        final nextParentRes = await conn.execute(
+          'SELECT parent_id FROM conference_sections WHERE id = :id',
+          {'id': currentParentId.toString()},
+        );
+        if (nextParentRes.rows.isEmpty) {
+          break;
+        }
+        currentParentId = int.tryParse(
+            nextParentRes.rows.first.assoc()['parent_id']?.toString() ?? '');
+      }
+    }
+    final parentChanged = newParentId != oldParentId;
+    if (!hasSortOrder && parentChanged) {
+      final maxRes = await conn.execute('''
+          SELECT COALESCE(MAX(sort_order), -1) AS max_sort
+          FROM conference_sections
+          WHERE conference_content_id = :conferenceId
+            AND id <> :sectionId
+            AND (
+              (:parentId IS NULL AND parent_id IS NULL)
+              OR parent_id = :parentId
+            )
+        ''', {
+        'conferenceId': oldValue['conference_content_id']?.toString(),
+        'sectionId': sectionId.toString(),
+        'parentId': newParentId?.toString(),
+      });
+      final maxSort = int.tryParse(
+              maxRes.rows.first.assoc()['max_sort']?.toString() ?? '-1') ??
+          -1;
+      newSortOrder = maxSort + 1;
+    }
+    const allowedStatuses = {'draft', 'in_review', 'approved', 'archived'};
+    if (!allowedStatuses.contains(newStatus)) {
+      return Response(400,
+          body: 'Invalid status. Use draft, in_review, approved, or archived.');
+    }
+
+    await conn.execute('''
+      UPDATE conference_sections
+      SET section_title = :sectionTitle,
+          section_body = :sectionBody,
+          sort_order = :sortOrder,
+          parent_id = :parentId,
+          status = :status,
+          updated_by_member_id = :memberId
+      WHERE id = :id
+    ''', {
+      'sectionTitle': newTitle,
+      'sectionBody': newBody,
+      'sortOrder': newSortOrder.toString(),
+      'parentId': newParentId?.toString(),
+      'status': newStatus,
+      'memberId': authMemberId.toString(),
+      'id': sectionId.toString(),
+    });
+
+    await _logAudit(
+      conn,
+      entityType: 'conference_section',
+      entityId: sectionId,
+      action: 'UPDATE',
+      changedByMemberId: authMemberId,
+      oldValue: oldValue,
+      newValue: {
+        'section_title': newTitle,
+        'section_body': newBody,
+        'sort_order': newSortOrder,
+        'parent_id': newParentId,
+        'status': newStatus,
+      },
+    );
+
+    return Response.ok(jsonEncode({'success': true}),
+        headers: {'Content-Type': 'application/json'});
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _updateConferenceSection: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _deleteConferenceSection(Request req, String idStr) async {
+  stderr.writeln('🔵 DELETE /conference_sections/$idStr');
+  final sectionId = int.tryParse(idStr);
+  if (sectionId == null) return Response.badRequest(body: 'Invalid section ID');
+
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) {
+      return Response(401, body: 'Unauthorized');
+    }
+
+    conn = await _connect();
+    if (!await _canEditConference(conn, authMemberId)) {
+      return Response(403, body: 'Forbidden: conference team access required');
+    }
+
+    final oldRes = await conn.execute(
+        'SELECT * FROM conference_sections WHERE id = :id',
+        {'id': sectionId.toString()});
+    if (oldRes.rows.isEmpty) return Response.notFound('Section not found');
+    final oldValue = oldRes.rows.first.assoc();
+
+    await conn.execute('''
+      UPDATE conference_sections
+      SET status = 'archived',
+          archived_at = CURRENT_TIMESTAMP,
+          archived_by_member_id = :memberId,
+          updated_by_member_id = :memberId
+      WHERE id = :id
+    ''', {
+      'memberId': authMemberId.toString(),
+      'id': sectionId.toString(),
+    });
+
+    await _logAudit(
+      conn,
+      entityType: 'conference_section',
+      entityId: sectionId,
+      action: 'ARCHIVE',
+      changedByMemberId: authMemberId,
+      oldValue: oldValue,
+      newValue: {
+        'status': 'archived',
+      },
+    );
+
+    return Response.ok(
+      jsonEncode({'success': true, 'archived': true}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _deleteConferenceSection: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _archiveConferenceSection(Request req, String idStr) async {
+  stderr.writeln('🔵 PUT /conference_sections/$idStr/archive');
+  final sectionId = int.tryParse(idStr);
+  if (sectionId == null) return Response.badRequest(body: 'Invalid section ID');
+
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) return Response(401, body: 'Unauthorized');
+
+    conn = await _connect();
+    if (!await _canEditConference(conn, authMemberId)) {
+      return Response(403, body: 'Forbidden: conference team access required');
+    }
+
+    final oldRes = await conn.execute(
+      'SELECT * FROM conference_sections WHERE id = :id',
+      {'id': sectionId.toString()},
+    );
+    if (oldRes.rows.isEmpty) return Response.notFound('Section not found');
+    final oldValue = oldRes.rows.first.assoc();
+
+    await conn.execute('''
+      UPDATE conference_sections
+      SET status = 'archived',
+          archived_at = CURRENT_TIMESTAMP,
+          archived_by_member_id = :memberId,
+          updated_by_member_id = :memberId
+      WHERE id = :id
+    ''', {
+      'memberId': authMemberId.toString(),
+      'id': sectionId.toString(),
+    });
+
+    await _logAudit(
+      conn,
+      entityType: 'conference_section',
+      entityId: sectionId,
+      action: 'ARCHIVE',
+      changedByMemberId: authMemberId,
+      oldValue: oldValue,
+      newValue: {'status': 'archived'},
+    );
+
+    return Response.ok(
+      jsonEncode({'id': sectionId, 'status': 'archived'}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _archiveConferenceSection: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _restoreConferenceSection(Request req, String idStr) async {
+  stderr.writeln('🔵 PUT /conference_sections/$idStr/restore');
+  final sectionId = int.tryParse(idStr);
+  if (sectionId == null) return Response.badRequest(body: 'Invalid section ID');
+
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) return Response(401, body: 'Unauthorized');
+
+    conn = await _connect();
+    if (!await _canEditConference(conn, authMemberId)) {
+      return Response(403, body: 'Forbidden: conference team access required');
+    }
+
+    final oldRes = await conn.execute(
+      'SELECT * FROM conference_sections WHERE id = :id',
+      {'id': sectionId.toString()},
+    );
+    if (oldRes.rows.isEmpty) return Response.notFound('Section not found');
+    final oldValue = oldRes.rows.first.assoc();
+
+    await conn.execute('''
+      UPDATE conference_sections
+      SET status = 'draft',
+          archived_at = NULL,
+          archived_by_member_id = NULL,
+          updated_by_member_id = :memberId
+      WHERE id = :id
+    ''', {
+      'memberId': authMemberId.toString(),
+      'id': sectionId.toString(),
+    });
+
+    await _logAudit(
+      conn,
+      entityType: 'conference_section',
+      entityId: sectionId,
+      action: 'RESTORE',
+      changedByMemberId: authMemberId,
+      oldValue: oldValue,
+      newValue: {'status': 'draft'},
+    );
+
+    return Response.ok(
+      jsonEncode({'id': sectionId, 'status': 'draft'}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _restoreConferenceSection: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _reorderConferenceSections(Request req) async {
+  stderr.writeln('🔵 PUT /conference_sections/reorder');
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) return Response(401, body: 'Unauthorized');
+
+    final raw = await req.readAsString();
+    if (raw.isEmpty) return Response(400, body: 'Missing body');
+    final bodyJson = jsonDecode(raw) as Map<String, dynamic>;
+    final rows = bodyJson['section_orders'];
+    if (rows is! List) {
+      return Response(400,
+          body: 'section_orders is required and must be a list');
+    }
+
+    final normalized = <Map<String, int>>[];
+    for (final row in rows) {
+      if (row is! Map) {
+        return Response(400,
+            body: 'Each section_orders item must be an object');
+      }
+      final map = Map<String, dynamic>.from(row);
+      final sectionId = int.tryParse(map['section_id']?.toString() ?? '');
+      final sortOrder = int.tryParse(map['sort_order']?.toString() ?? '');
+      if (sectionId == null || sortOrder == null) {
+        return Response(400,
+            body: 'Each item needs integer section_id and sort_order');
+      }
+      normalized.add({'section_id': sectionId, 'sort_order': sortOrder});
+    }
+
+    conn = await _connect();
+    if (!await _canEditConference(conn, authMemberId)) {
+      return Response(403, body: 'Forbidden: conference team access required');
+    }
+
+    await conn.execute('START TRANSACTION');
+    try {
+      for (final item in normalized) {
+        await conn.execute('''
+          UPDATE conference_sections
+          SET sort_order = :sortOrder,
+              updated_by_member_id = :memberId
+          WHERE id = :id
+        ''', {
+          'sortOrder': item['sort_order'].toString(),
+          'memberId': authMemberId.toString(),
+          'id': item['section_id'].toString(),
+        });
+      }
+      await conn.execute('COMMIT');
+    } catch (_) {
+      await conn.execute('ROLLBACK');
+      rethrow;
+    }
+
+    await _logAudit(
+      conn,
+      entityType: 'conference_section',
+      entityId: 0,
+      action: 'REORDER',
+      changedByMemberId: authMemberId,
+      newValue: {'section_orders': normalized},
+    );
+
+    return Response.ok(
+      jsonEncode({'updated': normalized.length}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _reorderConferenceSections: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Map<String, dynamic>?> _getConferenceSectionById(
+  MySQLConnection conn,
+  int sectionId,
+) async {
+  final res = await conn.execute(
+    'SELECT * FROM conference_sections WHERE id = :id',
+    {'id': sectionId.toString()},
+  );
+  if (res.rows.isEmpty) return null;
+  return res.rows.first.assoc();
+}
+
+Future<Response> _presignConferenceSectionAttachment(
+    Request req, String sectionIdStr) async {
+  stderr.writeln(
+      '🔵 POST /conference_sections/$sectionIdStr/attachments/presign');
+  final sectionId = int.tryParse(sectionIdStr);
+  if (sectionId == null) return Response.badRequest(body: 'Invalid section ID');
+
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) return Response(401, body: 'Unauthorized');
+
+    final raw = await req.readAsString();
+    if (raw.isEmpty) return Response(400, body: 'Missing body');
+    final bodyJson = jsonDecode(raw) as Map<String, dynamic>;
+
+    final filename = _sanitizeFilename(bodyJson['filename']?.toString() ?? '');
+    final mimeType = (bodyJson['mime_type']?.toString() ?? '').toLowerCase();
+    final fileSizeBytes =
+        int.tryParse(bodyJson['file_size_bytes']?.toString() ?? '');
+
+    if (filename.isEmpty || mimeType.isEmpty || fileSizeBytes == null) {
+      return Response(400,
+          body: 'filename, mime_type, and file_size_bytes are required');
+    }
+    if (!_allowedAttachmentMimeTypes.contains(mimeType)) {
+      return Response(400, body: 'Unsupported file type: $mimeType');
+    }
+    if (fileSizeBytes > _attachmentsHardCapBytes) {
+      return Response(413,
+          body:
+              'File exceeds hard cap of ${_attachmentsHardCapBytes ~/ (1024 * 1024)} MB');
+    }
+    if (fileSizeBytes > _attachmentsMaxBytes) {
+      return Response(413,
+          body:
+              'File exceeds default max of ${_attachmentsMaxBytes ~/ (1024 * 1024)} MB');
+    }
+
+    conn = await _connect();
+    if (!await _canEditConference(conn, authMemberId)) {
+      return Response(403, body: 'Forbidden: conference team access required');
+    }
+
+    final section = await _getConferenceSectionById(conn, sectionId);
+    if (section == null) return Response.notFound('Section not found');
+
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+    final storageKey = 'conference/sections/$sectionId/${stamp}_$filename';
+
+    if (_attachmentsPresignMode == 'disabled') {
+      return Response(501,
+          body:
+              'Presign disabled. Set ATTACHMENTS_PRESIGN_MODE=mock for development.');
+    }
+
+    if (_attachmentsPresignMode == 'mock') {
+      final uploadUrl =
+          '/conference_sections/$sectionId/attachments/mock_upload?storage_key=${Uri.encodeQueryComponent(storageKey)}';
+      return Response.ok(
+        jsonEncode({
+          'upload_url': uploadUrl,
+          'method': 'PUT',
+          'storage_key': storageKey,
+          'bucket': _mockAttachmentsBucket,
+          'required_headers': {
+            'Content-Type': mimeType,
+          },
+          'expires_in': 900,
+          'is_mock': true,
+        }),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+
+    if (_attachmentsBucket.isEmpty) {
+      return Response(503,
+          body: 'Attachment storage not configured: ATTACHMENTS_S3_BUCKET');
+    }
+
+    final uploadUrl =
+        'https://$_attachmentsBucket.s3.$_attachmentsRegion.amazonaws.com/$storageKey';
+    return Response.ok(
+      jsonEncode({
+        'upload_url': uploadUrl,
+        'method': 'PUT',
+        'storage_key': storageKey,
+        'bucket': _attachmentsBucket,
+        'required_headers': {
+          'Content-Type': mimeType,
+        },
+        'expires_in': 900,
+        'is_mock': false,
+      }),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _presignConferenceSectionAttachment: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _mockUploadConferenceSectionAttachment(
+    Request req, String sectionIdStr) async {
+  stderr.writeln(
+      '🔵 PUT /conference_sections/$sectionIdStr/attachments/mock_upload');
+  final sectionId = int.tryParse(sectionIdStr);
+  if (sectionId == null) return Response.badRequest(body: 'Invalid section ID');
+
+  try {
+    final storageKeyRaw = req.url.queryParameters['storage_key']?.trim() ?? '';
+    final storageKey = _normalizeMockStorageKey(storageKeyRaw);
+    if (storageKey == null) {
+      return Response.badRequest(body: 'Invalid storage_key');
+    }
+    if (!storageKey.startsWith('conference/sections/$sectionId/')) {
+      return Response.badRequest(body: 'storage_key does not match section');
+    }
+
+    final bytes = await req.read().expand((chunk) => chunk).toList();
+    if (bytes.isEmpty) return Response.badRequest(body: 'Missing upload body');
+    if (bytes.length > _attachmentsHardCapBytes) {
+      return Response(413,
+          body:
+              'File exceeds hard cap of ${_attachmentsHardCapBytes ~/ (1024 * 1024)} MB');
+    }
+
+    await _writeMockAttachmentBytes(storageKey, bytes);
+    return Response.ok(
+      jsonEncode({
+        'saved': true,
+        'storage_key': storageKey,
+        'size_bytes': bytes.length
+      }),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e, st) {
+    stderr
+        .writeln('❌ Error in _mockUploadConferenceSectionAttachment: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  }
+}
+
+Future<Response> _createConferenceSectionAttachment(
+    Request req, String sectionIdStr) async {
+  stderr.writeln('🔵 POST /conference_sections/$sectionIdStr/attachments');
+  final sectionId = int.tryParse(sectionIdStr);
+  if (sectionId == null) return Response.badRequest(body: 'Invalid section ID');
+
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) return Response(401, body: 'Unauthorized');
+
+    final raw = await req.readAsString();
+    if (raw.isEmpty) return Response(400, body: 'Missing body');
+    final bodyJson = jsonDecode(raw) as Map<String, dynamic>;
+
+    final storageKey = bodyJson['storage_key']?.toString().trim() ?? '';
+    final originalFilename =
+        _sanitizeFilename(bodyJson['original_filename']?.toString() ?? '');
+    final mimeType = (bodyJson['mime_type']?.toString() ?? '').toLowerCase();
+    final fileSizeBytes =
+        int.tryParse(bodyJson['file_size_bytes']?.toString() ?? '');
+    final thumbnailStorageKey =
+        bodyJson['thumbnail_storage_key']?.toString().trim();
+
+    if (storageKey.isEmpty ||
+        originalFilename.isEmpty ||
+        mimeType.isEmpty ||
+        fileSizeBytes == null) {
+      return Response(400,
+          body:
+              'storage_key, original_filename, mime_type and file_size_bytes are required');
+    }
+    if (!_allowedAttachmentMimeTypes.contains(mimeType)) {
+      return Response(400, body: 'Unsupported file type: $mimeType');
+    }
+    if (fileSizeBytes > _attachmentsHardCapBytes) {
+      return Response(413,
+          body:
+              'File exceeds hard cap of ${_attachmentsHardCapBytes ~/ (1024 * 1024)} MB');
+    }
+
+    final fileKind = _detectAttachmentKind(mimeType);
+    final sortOrder = int.tryParse(bodyJson['sort_order']?.toString() ?? '');
+    final width = int.tryParse(bodyJson['width']?.toString() ?? '');
+    final height = int.tryParse(bodyJson['height']?.toString() ?? '');
+
+    conn = await _connect();
+    if (!await _canEditConference(conn, authMemberId)) {
+      return Response(403, body: 'Forbidden: conference team access required');
+    }
+
+    final section = await _getConferenceSectionById(conn, sectionId);
+    if (section == null) return Response.notFound('Section not found');
+
+    var finalSortOrder = sortOrder;
+    if (finalSortOrder == null) {
+      final maxRes = await conn.execute(
+        'SELECT COALESCE(MAX(sort_order), -1) AS max_sort FROM conference_section_attachments WHERE section_id = :sectionId',
+        {'sectionId': sectionId.toString()},
+      );
+      final maxSort = int.tryParse(
+              maxRes.rows.first.assoc()['max_sort']?.toString() ?? '-1') ??
+          -1;
+      finalSortOrder = maxSort + 1;
+    }
+
+    final bucketForRow = _attachmentsPresignMode == 'mock'
+        ? _mockAttachmentsBucket
+        : _attachmentsBucket;
+
+    await conn.execute('''
+      INSERT INTO conference_section_attachments (
+        section_id, storage_key, bucket, original_filename, mime_type,
+        file_size_bytes, file_kind, width, height, thumbnail_storage_key,
+        sort_order, status, created_by_member_id
+      ) VALUES (
+        :sectionId, :storageKey, :bucket, :filename, :mimeType,
+        :sizeBytes, :fileKind, :width, :height, :thumbKey,
+        :sortOrder, 'active', :memberId
+      )
+    ''', {
+      'sectionId': sectionId.toString(),
+      'storageKey': storageKey,
+      'bucket': bucketForRow,
+      'filename': originalFilename,
+      'mimeType': mimeType,
+      'sizeBytes': fileSizeBytes.toString(),
+      'fileKind': fileKind,
+      'width': width?.toString(),
+      'height': height?.toString(),
+      'thumbKey': thumbnailStorageKey,
+      'sortOrder': finalSortOrder.toString(),
+      'memberId': authMemberId.toString(),
+    });
+
+    final idRes = await conn.execute('SELECT LAST_INSERT_ID() AS id');
+    final attachmentId = int.parse(idRes.rows.first.assoc()['id']!);
+
+    await _logAudit(
+      conn,
+      entityType: 'conference_attachment',
+      entityId: attachmentId,
+      action: 'CREATE',
+      changedByMemberId: authMemberId,
+      newValue: {
+        'section_id': sectionId,
+        'storage_key': storageKey,
+        'original_filename': originalFilename,
+        'mime_type': mimeType,
+        'file_size_bytes': fileSizeBytes,
+        'file_kind': fileKind,
+        'sort_order': finalSortOrder,
+      },
+    );
+
+    return Response(201,
+        body: jsonEncode({'id': attachmentId}),
+        headers: {'Content-Type': 'application/json'});
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _createConferenceSectionAttachment: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _listConferenceSectionAttachments(
+    Request req, String sectionIdStr) async {
+  stderr.writeln('🔵 GET /conference_sections/$sectionIdStr/attachments');
+  final sectionId = int.tryParse(sectionIdStr);
+  if (sectionId == null) return Response.badRequest(body: 'Invalid section ID');
+
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) return Response(401, body: 'Unauthorized');
+
+    final includeArchived =
+        req.url.queryParameters['include_archived']?.toLowerCase() == 'true';
+
+    conn = await _connect();
+    final section = await _getConferenceSectionById(conn, sectionId);
+    if (section == null) return Response.notFound('Section not found');
+
+    final isEditor = await _canEditConference(conn, authMemberId);
+    if (!isEditor && includeArchived) {
+      return Response(403,
+          body: 'Forbidden: include_archived requires conference team access');
+    }
+
+    final res = await conn.execute('''
+      SELECT id, section_id, storage_key, bucket, original_filename, mime_type,
+             file_size_bytes, file_kind, width, height, thumbnail_storage_key,
+             sort_order, status, archived_at, archived_by_member_id,
+             created_by_member_id, created_at, updated_at
+      FROM conference_section_attachments
+      WHERE section_id = :sectionId
+        AND (:includeArchived = 'true' OR status <> 'archived')
+      ORDER BY sort_order ASC, id ASC
+    ''', {
+      'sectionId': sectionId.toString(),
+      'includeArchived': includeArchived.toString(),
+    });
+
+    final items = res.rows.map((row) {
+      final a = row.assoc();
+      final attachmentId = int.tryParse((a['id'] ?? '').toString());
+      final downloadUrl = attachmentId == null
+          ? null
+          : _buildSignedAttachmentDownloadPath(
+              attachmentId: attachmentId,
+              memberId: authMemberId,
+            );
+      return {
+        'id': a['id'],
+        'section_id': a['section_id'],
+        'storage_key': a['storage_key'],
+        'bucket': a['bucket'],
+        'original_filename': a['original_filename'],
+        'mime_type': a['mime_type'],
+        'file_size_bytes': a['file_size_bytes'],
+        'file_kind': a['file_kind'],
+        'width': a['width'],
+        'height': a['height'],
+        'thumbnail_storage_key': a['thumbnail_storage_key'],
+        'sort_order': a['sort_order'],
+        'status': a['status'],
+        'archived_at': a['archived_at']?.toString(),
+        'archived_by_member_id': a['archived_by_member_id'],
+        'created_by_member_id': a['created_by_member_id'],
+        'created_at': a['created_at']?.toString(),
+        'updated_at': a['updated_at']?.toString(),
+        'download_url': downloadUrl,
+      };
+    }).toList();
+
+    return Response.ok(
+      jsonEncode({'items': items}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _listConferenceSectionAttachments: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _reorderConferenceSectionAttachments(
+    Request req, String sectionIdStr) async {
+  stderr
+      .writeln('🔵 PUT /conference_sections/$sectionIdStr/attachments/reorder');
+  final sectionId = int.tryParse(sectionIdStr);
+  if (sectionId == null) return Response.badRequest(body: 'Invalid section ID');
+
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) return Response(401, body: 'Unauthorized');
+
+    final raw = await req.readAsString();
+    if (raw.isEmpty) return Response(400, body: 'Missing body');
+    final bodyJson = jsonDecode(raw) as Map<String, dynamic>;
+    final rows = bodyJson['attachment_orders'];
+    if (rows is! List) {
+      return Response(400,
+          body: 'attachment_orders is required and must be a list');
+    }
+
+    final normalized = <Map<String, int>>[];
+    for (final row in rows) {
+      if (row is! Map) {
+        return Response(400,
+            body: 'Each attachment_orders item must be an object');
+      }
+      final map = Map<String, dynamic>.from(row);
+      final attachmentId = int.tryParse(map['attachment_id']?.toString() ?? '');
+      final sortOrder = int.tryParse(map['sort_order']?.toString() ?? '');
+      if (attachmentId == null || sortOrder == null) {
+        return Response(400,
+            body: 'Each item needs integer attachment_id and sort_order');
+      }
+      normalized.add({'attachment_id': attachmentId, 'sort_order': sortOrder});
+    }
+
+    conn = await _connect();
+    if (!await _canEditConference(conn, authMemberId)) {
+      return Response(403, body: 'Forbidden: conference team access required');
+    }
+
+    final section = await _getConferenceSectionById(conn, sectionId);
+    if (section == null) return Response.notFound('Section not found');
+
+    await conn.execute('START TRANSACTION');
+    try {
+      for (final item in normalized) {
+        final ownershipRes = await conn.execute(
+          'SELECT id FROM conference_section_attachments WHERE id = :id AND section_id = :sectionId',
+          {
+            'id': item['attachment_id'].toString(),
+            'sectionId': sectionId.toString(),
+          },
+        );
+        if (ownershipRes.rows.isEmpty) {
+          throw StateError(
+              'Attachment ${item['attachment_id']} is not in section $sectionId');
+        }
+
+        await conn.execute('''
+          UPDATE conference_section_attachments
+          SET sort_order = :sortOrder
+          WHERE id = :id
+        ''', {
+          'sortOrder': item['sort_order'].toString(),
+          'id': item['attachment_id'].toString(),
+        });
+      }
+      await conn.execute('COMMIT');
+    } catch (_) {
+      await conn.execute('ROLLBACK');
+      rethrow;
+    }
+
+    await _logAudit(
+      conn,
+      entityType: 'conference_attachment',
+      entityId: 0,
+      action: 'REORDER',
+      changedByMemberId: authMemberId,
+      newValue: {
+        'section_id': sectionId,
+        'attachment_orders': normalized,
+      },
+    );
+
+    return Response.ok(
+      jsonEncode({'updated': normalized.length}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _reorderConferenceSectionAttachments: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _archiveConferenceSectionAttachment(
+  Request req,
+  String sectionIdStr,
+  String attachmentIdStr,
+) async {
+  stderr.writeln(
+      '🔵 PUT /conference_sections/$sectionIdStr/attachments/$attachmentIdStr/archive');
+  final sectionId = int.tryParse(sectionIdStr);
+  final attachmentId = int.tryParse(attachmentIdStr);
+  if (sectionId == null || attachmentId == null) {
+    return Response.badRequest(body: 'Invalid section or attachment ID');
+  }
+
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) return Response(401, body: 'Unauthorized');
+
+    conn = await _connect();
+    if (!await _canEditConference(conn, authMemberId)) {
+      return Response(403, body: 'Forbidden: conference team access required');
+    }
+
+    final res = await conn.execute(
+      'SELECT * FROM conference_section_attachments WHERE id = :id AND section_id = :sectionId',
+      {
+        'id': attachmentId.toString(),
+        'sectionId': sectionId.toString(),
+      },
+    );
+    if (res.rows.isEmpty) return Response.notFound('Attachment not found');
+    final oldValue = res.rows.first.assoc();
+
+    await conn.execute('''
+      UPDATE conference_section_attachments
+      SET status = 'archived',
+          archived_at = CURRENT_TIMESTAMP,
+          archived_by_member_id = :memberId
+      WHERE id = :id
+    ''', {
+      'memberId': authMemberId.toString(),
+      'id': attachmentId.toString(),
+    });
+
+    await _logAudit(
+      conn,
+      entityType: 'conference_attachment',
+      entityId: attachmentId,
+      action: 'ARCHIVE',
+      changedByMemberId: authMemberId,
+      oldValue: oldValue,
+      newValue: {'status': 'archived'},
+    );
+
+    return Response.ok(
+      jsonEncode({'id': attachmentId, 'status': 'archived'}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _archiveConferenceSectionAttachment: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _restoreConferenceSectionAttachment(
+  Request req,
+  String sectionIdStr,
+  String attachmentIdStr,
+) async {
+  stderr.writeln(
+      '🔵 PUT /conference_sections/$sectionIdStr/attachments/$attachmentIdStr/restore');
+  final sectionId = int.tryParse(sectionIdStr);
+  final attachmentId = int.tryParse(attachmentIdStr);
+  if (sectionId == null || attachmentId == null) {
+    return Response.badRequest(body: 'Invalid section or attachment ID');
+  }
+
+  MySQLConnection? conn;
+  try {
+    final authMemberId = _getMemberIdFromRequest(req);
+    if (authMemberId == null) return Response(401, body: 'Unauthorized');
+
+    conn = await _connect();
+    if (!await _canEditConference(conn, authMemberId)) {
+      return Response(403, body: 'Forbidden: conference team access required');
+    }
+
+    final res = await conn.execute(
+      'SELECT * FROM conference_section_attachments WHERE id = :id AND section_id = :sectionId',
+      {
+        'id': attachmentId.toString(),
+        'sectionId': sectionId.toString(),
+      },
+    );
+    if (res.rows.isEmpty) return Response.notFound('Attachment not found');
+    final oldValue = res.rows.first.assoc();
+
+    await conn.execute('''
+      UPDATE conference_section_attachments
+      SET status = 'active',
+          archived_at = NULL,
+          archived_by_member_id = NULL
+      WHERE id = :id
+    ''', {
+      'id': attachmentId.toString(),
+    });
+
+    await _logAudit(
+      conn,
+      entityType: 'conference_attachment',
+      entityId: attachmentId,
+      action: 'RESTORE',
+      changedByMemberId: authMemberId,
+      oldValue: oldValue,
+      newValue: {'status': 'active'},
+    );
+
+    return Response.ok(
+      jsonEncode({'id': attachmentId, 'status': 'active'}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _restoreConferenceSectionAttachment: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _conferenceAttachmentContent(
+  Request req,
+  String attachmentIdStr,
+) async {
+  stderr.writeln('🔵 GET /conference_attachments/$attachmentIdStr/content');
+  final attachmentId = int.tryParse(attachmentIdStr);
+  if (attachmentId == null) {
+    return Response.badRequest(body: 'Invalid attachment ID');
+  }
+
+  MySQLConnection? conn;
+  try {
+    var viewerMemberId = _getMemberIdFromRequest(req);
+    if (viewerMemberId == null) {
+      final signedMemberId =
+          int.tryParse(req.url.queryParameters['viewer_member_id'] ?? '');
+      final expires = int.tryParse(req.url.queryParameters['expires'] ?? '');
+      final token = req.url.queryParameters['token'] ?? '';
+      if (signedMemberId == null || expires == null || token.isEmpty) {
+        return Response(401, body: 'Unauthorized');
+      }
+
+      final isValid = _isValidSignedAttachmentRequest(
+        attachmentId: attachmentId,
+        memberId: signedMemberId,
+        expiresEpochSeconds: expires,
+        token: token,
+      );
+      if (!isValid) {
+        return Response(401, body: 'Invalid or expired download link');
+      }
+      viewerMemberId = signedMemberId;
+    }
+
+    conn = await _connect();
+    final res = await conn.execute('''
+      SELECT a.id, a.section_id, a.storage_key, a.bucket, a.original_filename,
+             a.mime_type, a.status, s.status AS section_status
+      FROM conference_section_attachments a
+      JOIN conference_sections s ON s.id = a.section_id
+      WHERE a.id = :id
+      LIMIT 1
+    ''', {
+      'id': attachmentId.toString(),
+    });
+
+    if (res.rows.isEmpty) return Response.notFound('Attachment not found');
+    final a = res.rows.first.assoc();
+
+    final isEditor = await _canEditConference(conn, viewerMemberId);
+    final attachmentStatus = (a['status'] ?? '').toString();
+    final sectionStatus = (a['section_status'] ?? '').toString();
+    if (!isEditor &&
+        (attachmentStatus == 'archived' || sectionStatus == 'archived')) {
+      return Response.notFound('Attachment not found');
+    }
+
+    final bucket = (a['bucket'] ?? '').toString();
+    final storageKey = (a['storage_key'] ?? '').toString();
+    final mimeType = (a['mime_type'] ?? 'application/octet-stream').toString();
+    final filename =
+        _sanitizeFilename((a['original_filename'] ?? 'attachment').toString());
+
+    if (bucket == _mockAttachmentsBucket) {
+      final normalizedStorageKey = _normalizeMockStorageKey(storageKey);
+      if (normalizedStorageKey == null) {
+        return Response.notFound('Attachment file not found');
+      }
+      final bytes = await _readMockAttachmentBytes(normalizedStorageKey);
+      if (bytes == null) return Response.notFound('Attachment file not found');
+
+      return Response.ok(
+        bytes,
+        headers: {
+          'Content-Type': mimeType,
+          'Content-Disposition': 'inline; filename="$filename"',
+          'Cache-Control': 'private, max-age=60',
+        },
+      );
+    }
+
+    final remoteUrl = _buildPresignedS3GetUrl(
+      bucket: bucket,
+      storageKey: storageKey,
+      expiresSeconds: _attachmentsDownloadTtlSeconds,
+    );
+    if (remoteUrl == null) {
+      return Response(503,
+          body:
+              'S3 download signing is not configured for private bucket access');
+    }
+    return Response.found(remoteUrl, headers: {
+      'Cache-Control': 'private, no-store',
+    });
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _conferenceAttachmentContent: $e\n$st');
     return Response.internalServerError(body: 'Error: $e');
   } finally {
     await conn?.close();
@@ -1868,18 +3436,20 @@ Future<Response> _saveConference(Request req) async {
     final conferenceDate = bodyJson['conference_date']?.toString().trim();
     final theme = bodyJson['theme']?.toString().trim();
     final locationsNotes = bodyJson['locations_notes']?.toString().trim();
-    final breakoutNotes = bodyJson['breakout_sessions_notes']?.toString().trim();
+    final breakoutNotes =
+        bodyJson['breakout_sessions_notes']?.toString().trim();
     final generalNotes = bodyJson['general_notes']?.toString().trim();
 
-    final existingRes = await conn.execute(
-        'SELECT * FROM conference_content ORDER BY id DESC LIMIT 1');
+    final existingRes = await conn
+        .execute('SELECT * FROM conference_content ORDER BY id DESC LIMIT 1');
     final oldValue =
         existingRes.rows.isNotEmpty ? existingRes.rows.first.assoc() : null;
 
     final params = {
       'title': (title == null || title.isEmpty) ? 'Conference' : title,
-      'conferenceDate':
-          (conferenceDate == null || conferenceDate.isEmpty) ? null : conferenceDate,
+      'conferenceDate': (conferenceDate == null || conferenceDate.isEmpty)
+          ? null
+          : conferenceDate,
       'theme': theme,
       'locationsNotes': locationsNotes,
       'breakoutNotes': breakoutNotes,
@@ -1909,7 +3479,8 @@ Future<Response> _saveConference(Request req) async {
         newValue: params,
       );
     } else {
-      conferenceId = int.parse(existingRes.rows.first.assoc()['id']!.toString());
+      conferenceId =
+          int.parse(existingRes.rows.first.assoc()['id']!.toString());
       await conn.execute('''
         UPDATE conference_content
         SET title = :title,
@@ -2065,14 +3636,15 @@ Future<Response> _updateConferenceIdeaStatus(Request req, String idStr) async {
     final raw = await req.readAsString();
     if (raw.isEmpty) return Response(400, body: 'Missing body');
     final bodyJson = jsonDecode(raw) as Map<String, dynamic>;
-    final status = _normalizeConferenceStatus(
-        bodyJson['status']?.toString().trim() ?? '');
+    final status =
+        _normalizeConferenceStatus(bodyJson['status']?.toString().trim() ?? '');
     if (status.isEmpty) {
       return Response(400, body: 'Invalid status');
     }
 
     final oldRes = await conn.execute(
-        'SELECT * FROM conference_ideas WHERE id = :id', {'id': ideaId.toString()});
+        'SELECT * FROM conference_ideas WHERE id = :id',
+        {'id': ideaId.toString()});
     if (oldRes.rows.isEmpty) return Response.notFound('Idea not found');
     final oldValue = oldRes.rows.first.assoc();
 
@@ -2120,12 +3692,13 @@ Future<Response> _deleteConferenceIdea(Request req, String idStr) async {
     }
 
     final oldRes = await conn.execute(
-        'SELECT * FROM conference_ideas WHERE id = :id', {'id': ideaId.toString()});
+        'SELECT * FROM conference_ideas WHERE id = :id',
+        {'id': ideaId.toString()});
     if (oldRes.rows.isEmpty) return Response.notFound('Idea not found');
     final oldValue = oldRes.rows.first.assoc();
 
-    await conn.execute(
-        'DELETE FROM conference_ideas WHERE id = :id', {'id': ideaId.toString()});
+    await conn.execute('DELETE FROM conference_ideas WHERE id = :id',
+        {'id': ideaId.toString()});
 
     await _logAudit(
       conn,
@@ -2861,6 +4434,42 @@ Handler _router() {
   // ============ CONFERENCE ROUTES ============
   router.get('/conference', _getConference);
   router.put('/conference', _saveConference);
+  router.post('/conference_sections', _createConferenceSection);
+  router.put('/conference_sections/reorder', _reorderConferenceSections);
+  router.put('/conference_sections/<id>/archive',
+      (Request req, String id) => _archiveConferenceSection(req, id));
+  router.put('/conference_sections/<id>/restore',
+      (Request req, String id) => _restoreConferenceSection(req, id));
+  router.post('/conference_sections/<id>/attachments/presign',
+      (Request req, String id) => _presignConferenceSectionAttachment(req, id));
+  router.put(
+      '/conference_sections/<id>/attachments/mock_upload',
+      (Request req, String id) =>
+          _mockUploadConferenceSectionAttachment(req, id));
+  router.post('/conference_sections/<id>/attachments',
+      (Request req, String id) => _createConferenceSectionAttachment(req, id));
+  router.get('/conference_sections/<id>/attachments',
+      (Request req, String id) => _listConferenceSectionAttachments(req, id));
+  router.put(
+      '/conference_sections/<id>/attachments/reorder',
+      (Request req, String id) =>
+          _reorderConferenceSectionAttachments(req, id));
+  router.put(
+      '/conference_sections/<id>/attachments/<attachmentId>/archive',
+      (Request req, String id, String attachmentId) =>
+          _archiveConferenceSectionAttachment(req, id, attachmentId));
+  router.put(
+      '/conference_sections/<id>/attachments/<attachmentId>/restore',
+      (Request req, String id, String attachmentId) =>
+          _restoreConferenceSectionAttachment(req, id, attachmentId));
+  router.get(
+      '/conference_attachments/<attachmentId>/content',
+      (Request req, String attachmentId) =>
+          _conferenceAttachmentContent(req, attachmentId));
+  router.put('/conference_sections/<id>',
+      (Request req, String id) => _updateConferenceSection(req, id));
+  router.delete('/conference_sections/<id>',
+      (Request req, String id) => _deleteConferenceSection(req, id));
   router.get('/conference_ideas', _getConferenceIdeas);
   router.post('/conference_ideas', _createConferenceIdea);
   router.put('/conference_ideas/<id>/status',
@@ -2883,10 +4492,10 @@ Handler _router() {
   router.delete(
       '/clubs/<id>', (Request req, String id) => _deleteClub(req, id));
 
-    // ============ DINNER MEAL OPTIONS ROUTES ============
-    router.get('/dinner_meal_options', _getDinnerMealOptions);
-    router.post('/dinner_meal_options', _saveDinnerMealOption);
-    router.delete('/dinner_meal_options/<id>',
+  // ============ DINNER MEAL OPTIONS ROUTES ============
+  router.get('/dinner_meal_options', _getDinnerMealOptions);
+  router.post('/dinner_meal_options', _saveDinnerMealOption);
+  router.delete('/dinner_meal_options/<id>',
       (Request req, String id) => _deleteDinnerMealOption(req, id));
 
   // ============ EVENT TYPES & ROLE TEMPLATES ROUTES ============
@@ -2963,7 +4572,7 @@ Future<Response> _createMember(Request req) async {
     final clubId = bodyJson['lions_club_id'];
     final isAdmin = _isTruthy(bodyJson['is_admin']) ? 1 : 0;
     final isConferenceMember =
-      _isTruthy(bodyJson['is_conference_member']) ? 1 : 0;
+        _isTruthy(bodyJson['is_conference_member']) ? 1 : 0;
 
     if (name.isEmpty || clubId == null) {
       return Response(400,

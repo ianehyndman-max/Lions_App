@@ -2,12 +2,27 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Flutter App (Lions_App)",
+      "name": "Flutter App (Lions_App Local)",
       "request": "launch",
       "type": "dart",
       "flutterMode": "debug",
       "program": "lib/main.dart",
-      "cwd": "${workspaceFolder}"
+      "cwd": "${workspaceFolder}",
+      "toolArgs": [
+        "--dart-define=USE_AWS=false",
+        "--dart-define=API_LOCAL_DEV_HOST=http://127.0.0.1:8080"
+      ]
+    },
+    {
+      "name": "Flutter App (Lions_App AWS)",
+      "request": "launch",
+      "type": "dart",
+      "flutterMode": "debug",
+      "program": "lib/main.dart",
+      "cwd": "${workspaceFolder}",
+      "toolArgs": [
+        "--dart-define=USE_AWS=true"
+      ]
     },
     {
       "name": "Dart API (lions_api)",
@@ -15,6 +30,36 @@
       "type": "dart",
       "program": "lions_api/bin/lions_api.dart",
       "cwd": "${workspaceFolder}/lions_api"
+    },
+    {
+      "name": "Dart API (lions_api Local DB)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lions_api/bin/lions_api.dart",
+      "cwd": "${workspaceFolder}/lions_api",
+      "env": {
+        "PORT": "8080",
+        "DB_HOST": "127.0.0.1",
+        "DB_PORT": "3306",
+        "DB_USER": "root",
+        "DB_PASS": "Add PW here when ready to use local DB",
+        "DB_NAME": "lions"
+      }
+    },
+    {
+      "name": "Dart API (lions_api AWS DB)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lions_api/bin/lions_api.dart",
+      "cwd": "${workspaceFolder}/lions_api",
+      "env": {
+        "PORT": "8080",
+        "DB_HOST": "${env:DB_HOST}",
+        "DB_PORT": "${env:DB_PORT}",
+        "DB_USER": "${env:DB_USER}",
+        "DB_PASS": "${env:DB_PASS}",
+        "DB_NAME": "${env:DB_NAME}"
+      }
     }
   ]
 }

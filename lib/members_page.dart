@@ -222,6 +222,7 @@ class _MembersPageState extends State<MembersPage> {
     final nameCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
+    bool isAdminMember = false;
     bool isConferenceMember = false;
     debugPrint('DEBUG: isSuper=$isSuper, _userClubId=$_userClubId');
 
@@ -303,6 +304,15 @@ class _MembersPageState extends State<MembersPage> {
                   ),
                 if (isSuper)
                   CheckboxListTile(
+                    value: isAdminMember,
+                    onChanged: (val) => setDlg(() => isAdminMember = val ?? false),
+                    title: const Text('Admin Access'),
+                    subtitle: const Text('Can create/edit members and events'),
+                    controlAffinity: ListTileControlAffinity.leading,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                if (isSuper)
+                  CheckboxListTile(
                     value: isConferenceMember,
                     onChanged: (val) => setDlg(() => isConferenceMember = val ?? false),
                     title: const Text('Conference Team Access'),
@@ -339,6 +349,7 @@ class _MembersPageState extends State<MembersPage> {
         'email': emailCtrl.text.trim(),
         'phone_number': phoneCtrl.text.trim(),
         'lions_club_id': selectedClubId,
+        if (isSuper) 'is_admin': isAdminMember ? 1 : 0,
         if (isSuper) 'is_conference_member': isConferenceMember ? 1 : 0,
       };
 

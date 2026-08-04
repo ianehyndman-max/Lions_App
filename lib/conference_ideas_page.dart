@@ -56,47 +56,58 @@ class _ConferenceIdeasPageState extends State<ConferenceIdeasPage> {
     final titleCtrl = TextEditingController();
     final categoryCtrl = TextEditingController();
     final descriptionCtrl = TextEditingController();
+    String? dialogError;
 
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Add Conference Idea'),
-        content: SizedBox(
-          width: 520,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: titleCtrl,
-                decoration: const InputDecoration(labelText: 'Title'),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: categoryCtrl,
-                decoration: const InputDecoration(labelText: 'Category'),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: descriptionCtrl,
-                decoration: const InputDecoration(labelText: 'Description'),
-                minLines: 4,
-                maxLines: 8,
-              ),
-            ],
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          title: const Text('Add Conference Idea'),
+          content: SizedBox(
+            width: 520,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleCtrl,
+                  decoration: const InputDecoration(labelText: 'Title'),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: categoryCtrl,
+                  decoration: const InputDecoration(labelText: 'Category'),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: descriptionCtrl,
+                  decoration: const InputDecoration(labelText: 'Description'),
+                  minLines: 4,
+                  maxLines: 8,
+                ),
+                if (dialogError != null) ...[
+                  const SizedBox(height: 8),
+                  Text(dialogError!, style: const TextStyle(color: Colors.red)),
+                ],
+              ],
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (titleCtrl.text.trim().isEmpty) {
+                  setDlg(() => dialogError = 'Title is required');
+                  return;
+                }
+                Navigator.pop(ctx, true);
+              },
+              child: const Text('Post'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: titleCtrl.text.trim().isEmpty
-                ? null
-                : () => Navigator.pop(ctx, true),
-            child: const Text('Post'),
-          ),
-        ],
       ),
     );
 

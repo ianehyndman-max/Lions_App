@@ -186,7 +186,7 @@ packages:
     source: hosted
     version: "7.0.1"
   file_picker:
-    dependency: "direct overridden"
+    dependency: "direct main"
     description:
       path: "third_party/file_picker"
       relative: true
@@ -1045,7 +1045,7 @@ packages:
     source: hosted
     version: "1.1.1"
   webview_flutter:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: webview_flutter
       sha256: ec81f57aa1611f8ebecf1d2259da4ef052281cb5ad624131c93546c79ccc7736

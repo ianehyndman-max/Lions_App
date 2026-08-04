@@ -58,6 +58,21 @@ CREATE TABLE IF NOT EXISTS `conference_ideas` (
   CONSTRAINT `fk_conference_ideas_member` FOREIGN KEY (`created_by_member_id`) REFERENCES `members` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS `conference_sections` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `conference_content_id` INT UNSIGNED NOT NULL,
+  `section_title` VARCHAR(255) NOT NULL,
+  `section_body` TEXT DEFAULT NULL,
+  `sort_order` INT NOT NULL DEFAULT 0,
+  `created_by_member_id` BIGINT DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_conference_sections_conference` (`conference_content_id`),
+  KEY `idx_conference_sections_sort` (`sort_order`),
+  KEY `idx_conference_sections_member` (`created_by_member_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS `event_types` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `name` VARCHAR(255) NOT NULL,
