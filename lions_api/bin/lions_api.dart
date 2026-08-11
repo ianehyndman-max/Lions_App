@@ -4496,6 +4496,8 @@ Handler _router() {
   // ============ MEMBERS ROUTES ============
   router.post('/members', _createMember);
   router.get('/members', _members);
+    router.get(
+      '/members/<id>', (Request req, String id) => _getMemberById(req, id));
   router.put(
       '/members/<id>', (Request req, String id) => _updateMember(req, id));
   router.delete(
@@ -4771,6 +4773,81 @@ Future<Response> _deleteMember(Request req, String idStr) async {
     return Response(204);
   } catch (e, st) {
     stderr.writeln('❌ Error in _deleteMember: $e\n$st');
+    return Response.internalServerError(body: 'Error: $e');
+  } finally {
+    await conn?.close();
+  }
+}
+
+Future<Response> _getMemberById(Request req, String idStr) async {
+  stderr.writeln('🔵 GET /members/$idStr');
+  final id = int.tryParse(idStr);
+  if (id == null) {
+    return Response.badRequest(body: 'Invalid member ID');
+  }
+
+  MySQLConnection? conn;
+  try {
+    conn = await _connect();
+
+    final authMemberId = _getMemberIdFromRequest(req);
+    final isSuper =
+        authMemberId != null ? await _isSuper(conn, authMemberId) : false;
+    final isAdmin =
+        authMemberId != null ? await _isAdmin(conn, authMemberId) : false;
+    final isSelf = authMemberId == id;
+
+    if (!isAdmin && !isSuper && !isSelf) {
+      return Response.forbidden(
+          'Admin access required or read own profile only');
+    }
+
+    final result = await conn.execute('''
+      SELECT m.id, m.name, m.email, m.phone_number, m.lions_club_id,
+             m.is_admin, m.is_super, m.is_conference_member, lc.name AS club_name
+      FROM members m
+      LEFT JOIN lions_club lc ON lc.id = m.lions_club_id
+      WHERE m.id = :id
+      LIMIT 1
+    ''', {
+      'id': id.toString(),
+    });
+
+    if (result.rows.isEmpty) {
+      return Response.notFound('Member not found');
+    }
+
+    final a = result.rows.first.assoc();
+    final isAdminInt =
+        (a['is_admin'] == 1 || a['is_admin'] == true || a['is_admin'] == '1')
+            ? 1
+            : 0;
+    final isSuperInt =
+        (a['is_super'] == 1 || a['is_super'] == true || a['is_super'] == '1')
+            ? 1
+            : 0;
+    final isConferenceInt = (a['is_conference_member'] == 1 ||
+            a['is_conference_member'] == true ||
+            a['is_conference_member'] == '1')
+        ? 1
+        : 0;
+
+    return Response.ok(
+      jsonEncode({
+        'id': a['id'],
+        'name': a['name'],
+        'email': a['email'],
+        'phone_number': a['phone_number'],
+        'lions_club_id': a['lions_club_id'],
+        'is_admin': isAdminInt,
+        'is_super': isSuperInt,
+        'is_conference_member': isConferenceInt,
+        'club_name': a['club_name'],
+      }),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e, st) {
+    stderr.writeln('❌ Error in _getMemberById: $e\n$st');
     return Response.internalServerError(body: 'Error: $e');
   } finally {
     await conn?.close();

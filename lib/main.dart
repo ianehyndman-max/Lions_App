@@ -280,6 +280,7 @@ class _MainScreenState extends State<MainScreen> {
       conference.ConferencePage(),
       news.NewsPage(),
     ];
+    unawaited(AuthStore.refreshProfile());
   }
 
   @override
