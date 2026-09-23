@@ -1752,6 +1752,103 @@ Future<Response> _unassignVolunteer(
 }
 
 // ---------------- Notify (email) ----------------
+// Public base URL used to build links embedded in outgoing emails.
+const _publicBaseUrl = 'https://api.thelionsapp.com';
+
+/// Escapes text per RFC 5545 (iCalendar) TEXT value rules.
+String _icsEscape(String value) {
+  return value
+      .replaceAll('\\', '\\\\')
+      .replaceAll(';', '\\;')
+      .replaceAll(',', '\\,')
+      .replaceAll('\r\n', '\\n')
+      .replaceAll('\n', '\\n');
+}
+
+/// Folds a line at 75 octets per RFC 5545, continuation lines start with a space.
+String _icsFoldLine(String line) {
+  if (line.length <= 75) return line;
+  final out = StringBuffer(line.substring(0, 75));
+  var rest = line.substring(75);
+  while (rest.isNotEmpty) {
+    final chunkLen = rest.length > 74 ? 74 : rest.length;
+    out.write('\r\n ${rest.substring(0, chunkLen)}');
+    rest = rest.substring(chunkLen);
+  }
+  return out.toString();
+}
+
+Future<Response> _eventCalendarIcs(Request req, String eventId) async {
+  stderr.writeln('📅 GET /events/$eventId/calendar.ics');
+  MySQLConnection? conn;
+  try {
+    conn = await _connect();
+
+    final eventResult = await conn.execute('''
+      SELECT e.id, et.name AS event_type, lc.name AS club_name, e.event_date, e.location, e.notes
+      FROM events e
+      LEFT JOIN event_types et ON e.event_type_id = et.id
+      LEFT JOIN lions_club lc ON lc.id = e.lions_club_id
+      WHERE e.id = :eventId
+    ''', {'eventId': eventId});
+    if (eventResult.rows.isEmpty) return Response.notFound('Event not found');
+
+    final event = eventResult.rows.first.assoc();
+    final eventDateStr = event['event_date']?.toString() ?? '';
+    final eventDate = DateTime.tryParse(eventDateStr);
+    if (eventDate == null) {
+      return Response(400, body: 'Event has no valid date');
+    }
+
+    // All-day event: DTEND is exclusive, so it is the day after DTSTART.
+    final startDate = DateTime(eventDate.year, eventDate.month, eventDate.day);
+    final endDate = startDate.add(const Duration(days: 1));
+    String ymd(DateTime d) =>
+        '${d.year.toString().padLeft(4, '0')}${d.month.toString().padLeft(2, '0')}${d.day.toString().padLeft(2, '0')}';
+
+    final summary =
+        '${event['event_type'] ?? 'Event'} \u00b7 ${event['club_name'] ?? ''}';
+    final location = event['location']?.toString() ?? '';
+    final notes = event['notes']?.toString() ?? '';
+    final dtStamp =
+        '${DateTime.now().toUtc().toIso8601String().replaceAll(RegExp(r'[-:]'), '').split('.').first}Z';
+
+    final lines = <String>[
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Lions Club App//Event Calendar//EN',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+      'BEGIN:VEVENT',
+      'UID:event-$eventId@thelionsapp.com',
+      'DTSTAMP:$dtStamp',
+      'DTSTART;VALUE=DATE:${ymd(startDate)}',
+      'DTEND;VALUE=DATE:${ymd(endDate)}',
+      'SUMMARY:${_icsEscape(summary)}',
+      if (location.isNotEmpty) 'LOCATION:${_icsEscape(location)}',
+      if (notes.isNotEmpty) 'DESCRIPTION:${_icsEscape(notes)}',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ];
+
+    final icsBody = '${lines.map(_icsFoldLine).join('\r\n')}\r\n';
+
+    return Response.ok(
+      icsBody,
+      headers: {
+        'Content-Type': 'text/calendar; charset=utf-8; method=PUBLISH',
+        'Content-Disposition':
+            'attachment; filename="event-$eventId.ics"',
+      },
+    );
+  } catch (e, st) {
+    stderr.writeln('❌ ERROR /events/$eventId/calendar.ics: $e\n$st');
+    return Response.internalServerError(body: 'Failed to generate calendar file');
+  } finally {
+    await conn?.close();
+  }
+}
+
 Future<Response> _notifyEventMembers(Request req, String eventId) async {
   stderr.writeln('📧 POST /events/$eventId/notify');
   Map<String, dynamic> bodyJson = {};
@@ -1873,6 +1970,7 @@ Future<Response> _notifyEventMembers(Request req, String eventId) async {
       'club_name': event['club_name']?.toString() ?? '',
       'roles_html': rolesHtml.toString(),
       'notes': event['notes']?.toString() ?? '',
+      'calendar_link': '$_publicBaseUrl/events/$eventId/calendar.ics',
     };
 
     // Choose templates
@@ -4548,6 +4646,8 @@ Handler _router() {
       '/events/<id>', (Request req, String id) => _deleteEvent(req, id));
   router.post('/events/<id>/notify',
       (Request req, String id) => _notifyEventMembers(req, id));
+  router.get('/events/<id>/calendar.ics',
+      (Request req, String id) => _eventCalendarIcs(req, id));
   router.post('/events/<id>/volunteers',
       (Request req, String id) => _assignVolunteer(req, id));
   router.post('/events/<id>/roles',

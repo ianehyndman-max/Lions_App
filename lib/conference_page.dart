@@ -1,10 +1,11 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img;
 import 'package:intl/intl.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -13,6 +14,43 @@ import 'auth_store.dart';
 import 'config.dart';
 import 'conference_ideas_page.dart';
 import 'conference_section_tree.dart';
+
+class _ImageCompressionRequest {
+  final Uint8List bytes;
+  final String mimeType;
+  final int maxDimension;
+  final int jpegQuality;
+
+  const _ImageCompressionRequest({
+    required this.bytes,
+    required this.mimeType,
+    required this.maxDimension,
+    required this.jpegQuality,
+  });
+}
+
+/// Runs off the UI thread via [compute]; returns the original bytes unchanged
+/// if decoding fails or the image is already within [maxDimension].
+Uint8List _compressImageBytes(_ImageCompressionRequest request) {
+  final decoded = img.decodeImage(request.bytes);
+  if (decoded == null) return request.bytes;
+
+  final longestSide = decoded.width >= decoded.height
+      ? decoded.width
+      : decoded.height;
+  final resized = longestSide > request.maxDimension
+      ? img.copyResize(
+          decoded,
+          width: decoded.width >= decoded.height ? request.maxDimension : null,
+          height: decoded.height > decoded.width ? request.maxDimension : null,
+        )
+      : decoded;
+
+  final encoded = request.mimeType == 'image/png'
+      ? img.encodePng(resized)
+      : img.encodeJpg(resized, quality: request.jpegQuality);
+  return Uint8List.fromList(encoded);
+}
 
 String? buildConferenceAttachmentUrl({
   required String bucket,
@@ -288,7 +326,6 @@ class _ConferencePageState extends State<ConferencePage> {
     final file = picked.files.first;
     final filename = file.name.trim();
     final mimeType = _mimeFromFilename(filename);
-    final fileSizeBytes = file.size;
 
     if (mimeType == null) {
       ScaffoldMessenger.of(
@@ -296,6 +333,39 @@ class _ConferencePageState extends State<ConferencePage> {
       ).showSnackBar(const SnackBar(content: Text('Unsupported file type')));
       return;
     }
+
+    Uint8List? bytes = file.bytes;
+    if (bytes == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not read file bytes for upload')),
+      );
+      return;
+    }
+
+    // Downscale/re-encode large photos off the UI thread so more images fit
+    // under the size caps and upload faster on mobile data.
+    if (mimeType == 'image/jpeg' || mimeType == 'image/png') {
+      try {
+        final compressed = await compute(
+          _compressImageBytes,
+          _ImageCompressionRequest(
+            bytes: bytes,
+            mimeType: mimeType,
+            maxDimension: 1920,
+            jpegQuality: 82,
+          ),
+        );
+        if (compressed.length < bytes.length) {
+          bytes = compressed;
+        }
+      } catch (_) {
+        // Fall back to the original bytes if compression fails.
+      }
+    }
+
+    final uploadBytes = bytes!;
+    final fileSizeBytes = uploadBytes.length;
+
     if (fileSizeBytes > _hardAttachmentCapBytes) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -343,11 +413,6 @@ class _ConferencePageState extends State<ConferencePage> {
         throw Exception('Invalid presign response');
       }
 
-      final Uint8List? bytes = file.bytes;
-      if (bytes == null) {
-        throw Exception('Could not read file bytes for upload');
-      }
-
       final uploadHeaders = <String, String>{};
       requiredHeaders.forEach((key, value) {
         uploadHeaders[key] = value.toString();
@@ -363,7 +428,7 @@ class _ConferencePageState extends State<ConferencePage> {
       final uploadRes = await http.put(
         uploadUri,
         headers: uploadHeaders,
-        body: bytes,
+        body: uploadBytes,
       );
       if (uploadRes.statusCode < 200 || uploadRes.statusCode >= 300) {
         throw Exception('Upload failed (${uploadRes.statusCode})');
