@@ -79,6 +79,23 @@ class _EventDetailPageState extends State<EventDetailPage> {
       .length;
   int get _unassignedCount => _roles.length - _assignedCount;
 
+  // Meal counts keyed by option; every menu option is listed even at 0.
+  Map<String, int> get _mealCounts {
+    final counts = <String, int>{
+      for (final option in _dinnerMealOptions) option: 0,
+      'No meal': 0,
+    };
+    for (final r in _roles) {
+      final hasName =
+          r['volunteer_name']?.toString().trim().isNotEmpty ?? false;
+      if (!hasName) continue;
+      final meal = r['meal_choice']?.toString().trim() ?? '';
+      final key = meal.isEmpty ? 'No meal' : meal;
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return counts;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1321,17 +1338,65 @@ class _EventDetailPageState extends State<EventDetailPage> {
                     color: Colors.red.shade50,
                     child: Padding(
                       padding: const EdgeInsets.all(16),
-                      child: Column(
+                      child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            _event!['event_type'] ?? '',
-                            style: theme.textTheme.titleLarge,
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _event!['event_type'] ?? '',
+                                  style: theme.textTheme.titleLarge,
+                                ),
+                                const SizedBox(height: 8),
+                                Text('Club: ${_event!['club_name'] ?? ''}'),
+                                Text('Date: ${_event!['date'] ?? ''}'),
+                                Text(
+                                  'Location: ${_event!['location'] ?? ''}',
+                                ),
+                              ],
+                            ),
                           ),
-                          const SizedBox(height: 8),
-                          Text('Club: ${_event!['club_name'] ?? ''}'),
-                          Text('Date: ${_event!['date'] ?? ''}'),
-                          Text('Location: ${_event!['location'] ?? ''}'),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Attending $_assignedCount of ${_roles.length}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              if (_isDinnerMeeting) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Total meals selected = ${_mealCounts.entries.where((e) => e.key != 'No meal' && e.key != 'Undecided').fold<int>(0, (sum, e) => sum + e.value)}',
+                                ),
+                                Text(
+                                  'Undecided = ${_mealCounts['Undecided'] ?? 0}',
+                                ),
+                                Text(
+                                  'No Meal = ${_mealCounts['No meal'] ?? 0}',
+                                ),
+                              ],
+                            ],
+                          ),
+                          if (_isDinnerMeeting) ...[
+                            const SizedBox(width: 48),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: _mealCounts.entries
+                                  .map(
+                                    (e) => Text(
+                                      '${e.key} x${e.value}',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                            ),
+                          ],
                         ],
                       ),
                     ),
