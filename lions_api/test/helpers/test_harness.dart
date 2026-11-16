@@ -47,10 +47,15 @@ class TestServer {
 
   final Process _process;
   final List<String> _logBuffer = [];
+  Directory? _mockDir;
 
   Uri get baseUri => Uri.parse('http://127.0.0.1:$testApiPort');
 
   static Future<TestServer> start() async {
+    // Isolate mock attachment uploads in a per-run temp directory.
+    final mockDir =
+        await Directory.systemTemp.createTemp('lions_test_attachments_');
+
     final process = await Process.start(
       'dart',
       ['run', 'bin/lions_api.dart'],
@@ -62,11 +67,12 @@ class TestServer {
         'DB_PASS': testDbPass,
         'DB_NAME': testDbName,
         'PORT': '$testApiPort',
-        'ATTACHMENT_PRESIGN_MODE': 'mock',
+        'ATTACHMENTS_PRESIGN_MODE': 'mock',
+        'ATTACHMENTS_MOCK_DIR': mockDir.path,
       },
     );
 
-    final server = TestServer._(process);
+    final server = TestServer._(process).._mockDir = mockDir;
 
     // Drain output so the process never blocks on a full pipe; keep a tail
     // for diagnostics. Set TEST_SERVER_LOGS=1 to stream it live.
@@ -111,6 +117,11 @@ class TestServer {
 
   void stop() {
     _process.kill();
+    try {
+      _mockDir?.deleteSync(recursive: true);
+    } catch (_) {
+      // Best-effort cleanup of the temp upload dir.
+    }
   }
 }
 
@@ -144,6 +155,16 @@ class TestApi {
   Future<http.Response> put(String path, {int? as, Object? body}) =>
       http.put(_uri(path),
           headers: _headers(as), body: body == null ? null : jsonEncode(body));
+
+  /// PUT with a raw byte body (e.g. the mock attachment upload endpoint).
+  Future<http.Response> putBytes(String path, List<int> bytes,
+          {int? as, String contentType = 'application/octet-stream'}) =>
+      http.put(_uri(path),
+          headers: {
+            'Content-Type': contentType,
+            if (as != null) 'x-member-id': '$as',
+          },
+          body: bytes);
 
   Future<http.Response> delete(String path, {int? as}) =>
       http.delete(_uri(path), headers: _headers(as));
