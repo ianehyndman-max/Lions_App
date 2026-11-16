@@ -67,6 +67,44 @@ String? buildConferenceAttachmentUrl({
   return 'https://$normalizedBucket.s3.$defaultS3Region.amazonaws.com/$resolvedStorageKey';
 }
 
+/// File extensions the conference attachment picker accepts, mapped to the
+/// MIME type sent to the API.
+const Map<String, String> conferenceAttachmentExtensionToMime = {
+  'jpg': 'image/jpeg',
+  'jpeg': 'image/jpeg',
+  'png': 'image/png',
+  'webp': 'image/webp',
+  'pdf': 'application/pdf',
+  'doc': 'application/msword',
+  'docx':
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'xls': 'application/vnd.ms-excel',
+  'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'ppt': 'application/vnd.ms-powerpoint',
+  'pptx':
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'txt': 'text/plain',
+};
+
+/// Human-readable attachment size, e.g. `512 B`, `1.5 KB`, `10.0 MB`.
+String formatAttachmentBytes(int bytes) {
+  if (bytes >= 1024 * 1024) {
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+  if (bytes >= 1024) {
+    return '${(bytes / 1024).toStringAsFixed(1)} KB';
+  }
+  return '$bytes B';
+}
+
+/// MIME type for an attachment filename, or null when the extension is
+/// missing or not allowed.
+String? attachmentMimeFromFilename(String filename) {
+  final parts = filename.toLowerCase().split('.');
+  if (parts.length < 2) return null;
+  return conferenceAttachmentExtensionToMime[parts.last];
+}
+
 class ConferencePage extends StatefulWidget {
   const ConferencePage({super.key});
 
@@ -79,24 +117,8 @@ class _ConferencePageState extends State<ConferencePage> {
   static const int _hardAttachmentCapBytes = 15 * 1024 * 1024;
   static const String _defaultS3Region = 'ap-southeast-2';
 
-  static const Map<String, String> _extensionToMime = {
-    'jpg': 'image/jpeg',
-    'jpeg': 'image/jpeg',
-    'png': 'image/png',
-    'webp': 'image/webp',
-    'pdf': 'application/pdf',
-    'doc': 'application/msword',
-    'docx':
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'xls': 'application/vnd.ms-excel',
-    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'ppt': 'application/vnd.ms-powerpoint',
-    'pptx':
-        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    'txt': 'text/plain',
-  };
-
-  static final List<String> _allowedExtensions = _extensionToMime.keys.toList();
+  static final List<String> _allowedExtensions =
+      conferenceAttachmentExtensionToMime.keys.toList();
 
   Map<String, dynamic> _conference = {};
   List<Map<String, dynamic>> _customSections = [];
@@ -163,22 +185,6 @@ class _ConferencePageState extends State<ConferencePage> {
   }
 
   int? _asInt(dynamic value) => int.tryParse(value?.toString() ?? '');
-
-  String _formatBytes(int bytes) {
-    if (bytes >= 1024 * 1024) {
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    }
-    if (bytes >= 1024) {
-      return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    }
-    return '$bytes B';
-  }
-
-  String? _mimeFromFilename(String filename) {
-    final parts = filename.toLowerCase().split('.');
-    if (parts.length < 2) return null;
-    return _extensionToMime[parts.last];
-  }
 
   IconData _iconForAttachment(Map<String, dynamic> attachment) {
     final kind = (attachment['file_kind'] ?? '').toString();
@@ -325,7 +331,7 @@ class _ConferencePageState extends State<ConferencePage> {
 
     final file = picked.files.first;
     final filename = file.name.trim();
-    final mimeType = _mimeFromFilename(filename);
+    final mimeType = attachmentMimeFromFilename(filename);
 
     if (mimeType == null) {
       ScaffoldMessenger.of(
@@ -370,7 +376,7 @@ class _ConferencePageState extends State<ConferencePage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'File exceeds hard cap (${_formatBytes(_hardAttachmentCapBytes)}).',
+            'File exceeds hard cap (${formatAttachmentBytes(_hardAttachmentCapBytes)}).',
           ),
         ),
       );
@@ -380,7 +386,7 @@ class _ConferencePageState extends State<ConferencePage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'File exceeds max size (${_formatBytes(_maxAttachmentBytes)}).',
+            'File exceeds max size (${formatAttachmentBytes(_maxAttachmentBytes)}).',
           ),
         ),
       );
@@ -1086,7 +1092,7 @@ class _ConferencePageState extends State<ConferencePage> {
                   onTap: () => _openAttachment(attachment),
                   leading: _buildAttachmentPreview(attachment),
                   title: Text(filename),
-                  subtitle: Text('$mime • ${_formatBytes(bytes)}'),
+                  subtitle: Text('$mime • ${formatAttachmentBytes(bytes)}'),
                   trailing: Wrap(
                     spacing: 4,
                     children: [
@@ -1164,7 +1170,7 @@ class _ConferencePageState extends State<ConferencePage> {
                     onTap: () => _openAttachment(attachment),
                     leading: _buildAttachmentPreview(attachment),
                     title: Text(filename),
-                    subtitle: Text('$mime • ${_formatBytes(bytes)}'),
+                    subtitle: Text('$mime • ${formatAttachmentBytes(bytes)}'),
                     trailing: _canEdit && attachmentId != null
                         ? TextButton.icon(
                             onPressed: () =>
