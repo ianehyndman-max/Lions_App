@@ -69,9 +69,10 @@ docker compose -f docker-compose.test.yml down -v   # -v wipes all data
 Directory layout under `lions_api/test/`:
 
 - `unit/` — pure logic tests (currently: email template contracts)
-- `integration/` — HTTP tests against the real server + test DB
-  (members/clubs, events lifecycle, event types/templates/meal options;
-  conference and reports arriving next)
+- `integration/` — HTTP tests against the real server + test DB, covering
+  every registered route: members/clubs, events lifecycle, event
+  types/templates/meal options, conference (sections/attachments/ideas),
+  reports, audit logs, and email notify (dry-run)
 - `helpers/` — `test_harness.dart`: server subprocess bootstrap, authenticated
   HTTP client, DB reset/seed fixtures; `api_builders.dart`: create
   types/templates/events through the API for use as fixtures

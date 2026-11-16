@@ -245,6 +245,9 @@ These were found while assessing testability. **No changes have been made.** Sev
 | B15 | 🔵 | **Dead comparisons in permission helpers** — `mysql_client` returns column values as strings, so the `== 1` / `== true` branches in `_isSuper`/`_isAdmin`/`_isConferenceMember` are unreachable (only `== '1'` matches); harmless but flagged by the analyzer | `:340–376` |
 | B16 | 🔴 | **Unauthenticated member writes** — `POST /members` and `DELETE /members/<id>` perform **no identity or permission check at all**: anyone who can reach the API can create members or delete any member. Pinned by regression guards in `test/integration/members_clubs_test.dart` so the fix is a visible, deliberate change | `:4679–4741`, `:4844–4880` |
 | B17 | 🔴 | **Unauthenticated event writes** — `POST /events`, `DELETE /events/<id>`, and the volunteer assign/unassign endpoints perform no identity check: anyone can create or delete events and change volunteer assignments. Pinned by regression guards in `test/integration/events_test.dart` | `:795`, `:936`, `:1660–1760` |
+| B18 | 🔴 | **`/reports/volunteers` is broken** — the top-volunteers query selects `members.first_name`/`last_name`, but the table only has `name`; the endpoint returns 500 on every call against the shipped schema. Pinned in `test/integration/reports_audit_notify_test.dart` | `:4320–4345` |
+| B19 | 🔴 | **`/reports/club_comparison` is broken** — queries a non-existent `assignments` table plus `events.club_id`/`events.date` (actual: `lions_club_id`/`event_date`); 500 on every call. Pinned by test | `:4490–4530` |
+| B20 | 🔴 | **`/audit_logs` listing is broken** — selects `audit_log.changed_at`, but the schema column is `created_at`; 500 on every call, so the app's Audit Log page cannot work against this schema. (If it works in production, the production DB has drifted from `create_schema.sql` — worth reconciling either way.) Pinned by test | `:2093–2140` |
 
 ### C. Project-level
 
