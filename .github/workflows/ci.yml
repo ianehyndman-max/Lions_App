@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main, test-suite]
+  pull_request:
+    branches: [main]
+
+jobs:
+  flutter-app:
+    name: Flutter app (analyze + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.9'
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # Gate on errors only for now; the codebase has pre-existing
+      # warnings/infos. Tighten to --fatal-warnings once they are cleared.
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Run tests
+        run: flutter test --coverage
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-coverage
+          path: coverage/lcov.info
+
+  lions-api:
+    name: Backend API (analyze + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lions_api
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: lions_test
+          MYSQL_DATABASE: lions_test
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -plions_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Analyze
+        run: dart analyze
+
+      # Applies the same schema/migration scripts that
+      # docker-compose.test.yml uses locally, in the same order, so CI
+      # verifies they run cleanly on MySQL 8.
+      - name: Apply schema and migrations
+        run: |
+          mysql() { command mysql -h 127.0.0.1 -P 3307 -u root -plions_test lions_test "$@"; }
+          mysql < migrations/create_schema.sql
+          mysql < migrations/add_conference_section_status_fields.sql
+          mysql < test/db/add_conference_section_parent_id_mysql8.sql
+          mysql < migrations/create_conference_section_attachments.sql
+          mysql -e "SHOW TABLES;"
+
+      - name: Run unit tests
+        run: dart test test/unit
+
+      # Integration tests (test/integration) will be added in Phase 3 and
+      # run here against the MySQL service with:
+      #   DB_HOST=127.0.0.1 DB_PORT=3307 DB_USER=root DB_PASS=lions_test \
+      #   DB_NAME=lions_test dart test test/integration

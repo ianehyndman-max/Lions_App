@@ -1,30 +1,52 @@
-// This is a basic Flutter widget test.
+// App smoke tests.
 //
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
+// In widget tests Flutter replaces the real HTTP client with one that always
+// returns HTTP 400, so pages that fetch data in initState (e.g. the club list
+// on the onboarding page) deterministically take their error/empty path.
+// These tests verify the app boots into the correct screen for both the
+// first-run and the returning-user cases.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lions_app_3/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('shows onboarding page when no profile is stored',
+      (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues({});
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    await tester.pumpWidget(const LionsApp(showOnboarding: true));
+    await tester.pumpAndSettle();
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    expect(find.text('Welcome to Lions Club'), findsOneWidget);
+    expect(find.text('Select your club:'), findsOneWidget);
+    // Continue button is disabled until a club and member are chosen.
+    final continueButton =
+        tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Continue'));
+    expect(continueButton.onPressed, isNull);
+  });
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  testWidgets('shows main screen when a profile is stored',
+      (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues({
+      'member_id': 1,
+      'club_id': 1,
+      'is_admin': false,
+      'is_super': false,
+      'is_conference_member': false,
+    });
+
+    await tester.pumpWidget(const LionsApp(showOnboarding: false));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Lions Club'), findsWidgets);
+    // Main navigation tabs are present.
+    expect(find.text('Members'), findsOneWidget);
+    expect(find.text('Events'), findsOneWidget);
+    expect(find.text('Calendar'), findsOneWidget);
+    // Reports action is hidden for non-admin members.
+    expect(find.byTooltip('Reports'), findsNothing);
   });
 }

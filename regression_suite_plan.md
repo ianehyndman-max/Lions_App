@@ -213,7 +213,7 @@ These were found while assessing testability. **No changes have been made.** Sev
 
 | # | Severity | Issue | Location |
 |---|---|---|---|
-| A1 | 🔴 | **Broken test file**: `widget_test.dart` references non-existent `MyApp` (app class is `LionsApp`); `flutter test` fails today | `test/widget_test.dart:16` |
+| A1 | 🔴 | ~~**Broken test file**: `widget_test.dart` references non-existent `MyApp`~~ **Resolved in Phase 1** — replaced with real smoke tests | `test/widget_test.dart` |
 | A2 | 🔴 | **Hardcoded `http://localhost:8080`** for lookups and notifications — wrong on every real device and bypasses the configured base URL and auth header | `lib/calendar_page.dart:103–127` |
 | A3 | 🟡 | **Direct `http.*` calls bypass `ApiClient`**, omitting the `x-member-id` auth header and preventing central mocking | `create_event_dialog.dart:28–29, 453–457`; `onboarding_page.dart:31, 61`; `members_page.dart:47–61`; `events_page.dart:205, 244, 394`; `event_detail_page.dart:121, 550` |
 | A4 | 🟡 | **Duplicated API module** — `lib/lions_api.dart` and `lib/services/lions_api.dart` are near-identical; consolidate | both files, entire contents |
@@ -241,12 +241,14 @@ These were found while assessing testability. **No changes have been made.** Sev
 | B11 | 🔵 | **No connection pooling** — a fresh MySQL connection (plus TCP diagnostics written to stderr) per request | `:14–43, 117–135` |
 | B12 | 🔵 | **Monolithic structure** — all ~5,000 lines in one `bin/` file of private functions; blocks direct unit testing (addressed by Phase 6) | whole file |
 | B13 | 🔵 | **Input validation inconsistent across handlers** — some validate thoroughly, others don't; no central validation | throughout |
+| B14 | 🟡 | **`add_conference_section_parent_id.sql` uses MariaDB-only syntax** (`ADD COLUMN IF NOT EXISTS`) and fails on MySQL 8; masked in production because the API re-adds the column at startup. A MySQL 8–compatible version for the test DB lives at `lions_api/test/db/` | `migrations/add_conference_section_parent_id.sql` |
+| B15 | 🔵 | **Dead comparisons in permission helpers** — `mysql_client` returns column values as strings, so the `== 1` / `== true` branches in `_isSuper`/`_isAdmin`/`_isConferenceMember` are unreachable (only `== '1'` matches); harmless but flagged by the analyzer | `:340–376` |
 
 ### C. Project-level
 
 | # | Severity | Issue |
 |---|---|---|
-| C1 | 🔴 | **No CI** — nothing prevents a broken build or failing test from being committed |
+| C1 | 🔴 | ~~**No CI**~~ **Resolved in Phase 1** — `.github/workflows/ci.yml` runs analyze + tests for both projects (analyzer gates on errors only until pre-existing warnings are cleared) |
 | C2 | 🟡 | `lions-app-key.pem` sits in the repository root — verify it contains no private key material that should be removed from version control and rotated |
 | C3 | 🔵 | Build artifacts and installers (`build/`, `installer/*.exe`, `release_artifacts/`) tracked alongside source; consider pruning from version control |
 

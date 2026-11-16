@@ -1,0 +1,30 @@
+# Disposable MySQL database for lions_api integration tests.
+#
+# Usage:
+#   docker compose -f docker-compose.test.yml up -d --wait
+#   dart test test/integration
+#   docker compose -f docker-compose.test.yml down -v
+#
+# Schema and migrations are applied automatically on first start via
+# /docker-entrypoint-initdb.d (numbered mounts control execution order).
+# `down -v` destroys all data, so every `up` starts from a clean, seeded DB.
+
+services:
+  mysql-test:
+    image: mysql:8.0
+    container_name: lions-test-db
+    environment:
+      MYSQL_ROOT_PASSWORD: lions_test
+      MYSQL_DATABASE: lions_test
+    ports:
+      - "3307:3306"  # host port 3307 to avoid clashing with a local MySQL
+    volumes:
+      - ./migrations/create_schema.sql:/docker-entrypoint-initdb.d/01_create_schema.sql:ro
+      - ./migrations/add_conference_section_status_fields.sql:/docker-entrypoint-initdb.d/02_status_fields.sql:ro
+      - ./test/db/add_conference_section_parent_id_mysql8.sql:/docker-entrypoint-initdb.d/03_parent_id.sql:ro
+      - ./migrations/create_conference_section_attachments.sql:/docker-entrypoint-initdb.d/04_attachments.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-plions_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
