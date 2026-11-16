@@ -70,9 +70,11 @@ Directory layout under `lions_api/test/`:
 
 - `unit/` — pure logic tests (currently: email template contracts)
 - `integration/` — HTTP tests against the real server + test DB
-  (`members_clubs_test.dart`; more endpoint groups arriving through Phase 3)
+  (members/clubs, events lifecycle, event types/templates/meal options;
+  conference and reports arriving next)
 - `helpers/` — `test_harness.dart`: server subprocess bootstrap, authenticated
-  HTTP client, DB reset/seed fixtures
+  HTTP client, DB reset/seed fixtures; `api_builders.dart`: create
+  types/templates/events through the API for use as fixtures
 - `db/` — test-database-only SQL (e.g. the MySQL 8–compatible version of the
   `parent_id` migration; the shipped one uses MariaDB-only syntax)
 

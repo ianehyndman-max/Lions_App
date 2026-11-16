@@ -1,0 +1,3 @@
+# Integration tests share one database and one API port, so test suites must
+# not run concurrently. Unit tests are fast enough that this costs nothing.
+concurrency: 1
