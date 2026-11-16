@@ -14,8 +14,8 @@ The overall strategy, phased roadmap, and known gaps are documented in
 # All unit + widget tests (fast — run on every change)
 flutter test
 
-# Static analysis (CI gates on errors only for now)
-flutter analyze --no-fatal-infos --no-fatal-warnings
+# Static analysis, scoped to the app's own code (CI gates on errors only)
+flutter analyze --no-fatal-infos --no-fatal-warnings lib test
 ```
 
 Tests live in `test/`:

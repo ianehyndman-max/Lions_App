@@ -22,10 +22,13 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      # Analyze only the app's own code: lions_api and third_party are
+      # separate packages (lions_api is analyzed in its own job below), and
+      # their dependencies are not resolved in this job.
       # Gate on errors only for now; the codebase has pre-existing
       # warnings/infos. Tighten to --fatal-warnings once they are cleared.
       - name: Analyze
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings lib test
 
       - name: Run tests
         run: flutter test --coverage
