@@ -46,7 +46,7 @@ dart test test/unit
 dart analyze
 ```
 
-### Integration tests (Phase 3 — requires Docker)
+### Integration tests (requires Docker)
 
 A disposable MySQL 8 database is defined in
 `lions_api/docker-compose.test.yml`. Schema and migrations are applied
@@ -57,8 +57,11 @@ with any local MySQL.
 cd lions_api
 docker compose -f docker-compose.test.yml up -d --wait
 
-DB_HOST=127.0.0.1 DB_PORT=3307 DB_USER=root DB_PASS=lions_test \
-  DB_NAME=lions_test dart test test/integration
+# Harness defaults match the compose file (127.0.0.1:3307, root/lions_test);
+# override with TEST_DB_* / TEST_API_PORT env vars if needed.
+dart test test/integration
+
+# Set TEST_SERVER_LOGS=1 to stream API server output while debugging.
 
 docker compose -f docker-compose.test.yml down -v   # -v wipes all data
 ```
@@ -66,8 +69,10 @@ docker compose -f docker-compose.test.yml down -v   # -v wipes all data
 Directory layout under `lions_api/test/`:
 
 - `unit/` — pure logic tests (currently: email template contracts)
-- `integration/` — HTTP tests against a live server + test DB (Phase 3)
-- `helpers/` — shared test server bootstrap / DB seeding utilities (Phase 3)
+- `integration/` — HTTP tests against the real server + test DB
+  (`members_clubs_test.dart`; more endpoint groups arriving through Phase 3)
+- `helpers/` — `test_harness.dart`: server subprocess bootstrap, authenticated
+  HTTP client, DB reset/seed fixtures
 - `db/` — test-database-only SQL (e.g. the MySQL 8–compatible version of the
   `parent_id` migration; the shipped one uses MariaDB-only syntax)
 

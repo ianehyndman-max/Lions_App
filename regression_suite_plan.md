@@ -243,6 +243,7 @@ These were found while assessing testability. **No changes have been made.** Sev
 | B13 | 🔵 | **Input validation inconsistent across handlers** — some validate thoroughly, others don't; no central validation | throughout |
 | B14 | 🟡 | **`add_conference_section_parent_id.sql` uses MariaDB-only syntax** (`ADD COLUMN IF NOT EXISTS`) and fails on MySQL 8; masked in production because the API re-adds the column at startup. A MySQL 8–compatible version for the test DB lives at `lions_api/test/db/` | `migrations/add_conference_section_parent_id.sql` |
 | B15 | 🔵 | **Dead comparisons in permission helpers** — `mysql_client` returns column values as strings, so the `== 1` / `== true` branches in `_isSuper`/`_isAdmin`/`_isConferenceMember` are unreachable (only `== '1'` matches); harmless but flagged by the analyzer | `:340–376` |
+| B16 | 🔴 | **Unauthenticated member writes** — `POST /members` and `DELETE /members/<id>` perform **no identity or permission check at all**: anyone who can reach the API can create members or delete any member. Pinned by regression guards in `test/integration/members_clubs_test.dart` so the fix is a visible, deliberate change | `:4679–4741`, `:4844–4880` |
 
 ### C. Project-level
 

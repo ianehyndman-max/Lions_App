@@ -86,7 +86,7 @@ jobs:
       - name: Run unit tests
         run: dart test test/unit
 
-      # Integration tests (test/integration) will be added in Phase 3 and
-      # run here against the MySQL service with:
-      #   DB_HOST=127.0.0.1 DB_PORT=3307 DB_USER=root DB_PASS=lions_test \
-      #   DB_NAME=lions_test dart test test/integration
+      # Starts the real API as a subprocess against the MySQL service.
+      # Harness defaults (127.0.0.1:3307, root/lions_test) match the service.
+      - name: Run integration tests
+        run: dart test test/integration
