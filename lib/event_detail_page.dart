@@ -1338,27 +1338,24 @@ class _EventDetailPageState extends State<EventDetailPage> {
                     color: Colors.red.shade50,
                     child: Padding(
                       padding: const EdgeInsets.all(16),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _event!['event_type'] ?? '',
-                                  style: theme.textTheme.titleLarge,
-                                ),
-                                const SizedBox(height: 8),
-                                Text('Club: ${_event!['club_name'] ?? ''}'),
-                                Text('Date: ${_event!['date'] ?? ''}'),
-                                Text(
-                                  'Location: ${_event!['location'] ?? ''}',
-                                ),
-                              ],
-                            ),
-                          ),
-                          Column(
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final details = Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _event!['event_type'] ?? '',
+                                style: theme.textTheme.titleLarge,
+                              ),
+                              const SizedBox(height: 8),
+                              Text('Club: ${_event!['club_name'] ?? ''}'),
+                              Text('Date: ${_event!['date'] ?? ''}'),
+                              Text(
+                                'Location: ${_event!['location'] ?? ''}',
+                              ),
+                            ],
+                          );
+                          final summary = Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
@@ -1380,24 +1377,51 @@ class _EventDetailPageState extends State<EventDetailPage> {
                                 ),
                               ],
                             ],
-                          ),
-                          if (_isDinnerMeeting) ...[
-                            const SizedBox(width: 48),
-                            Column(
+                          );
+                          final meals = _isDinnerMeeting
+                              ? Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: _mealCounts.entries
+                                      .map(
+                                        (e) => Text(
+                                          '${e.key} x${e.value}',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                )
+                              : null;
+
+                          // Stack sections vertically on narrow (portrait phone) screens.
+                          final narrow = constraints.maxWidth < 600;
+                          if (narrow) {
+                            return Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
-                              children: _mealCounts.entries
-                                  .map(
-                                    (e) => Text(
-                                      '${e.key} x${e.value}',
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  )
-                                  .toList(),
-                            ),
-                          ],
-                        ],
+                              children: [
+                                details,
+                                const SizedBox(height: 12),
+                                summary,
+                                if (meals != null) ...[
+                                  const SizedBox(height: 12),
+                                  meals,
+                                ],
+                              ],
+                            );
+                          }
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(child: details),
+                              summary,
+                              if (meals != null) ...[
+                                const SizedBox(width: 48),
+                                meals,
+                              ],
+                            ],
+                          );
+                        },
                       ),
                     ),
                   ),
